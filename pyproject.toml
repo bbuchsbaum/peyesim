@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "peyesim"
+version = "0.1.0"
+description = "Analysis of eye-movement data – Python port of the R eyesim package"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.22",
+    "pandas>=1.4",
+    "scipy>=1.8",
+    "scikit-learn>=1.0",
+    "pot>=0.9",
+    "networkx>=2.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-xdist"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["peyesim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
