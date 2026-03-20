@@ -21,9 +21,6 @@ class _FrameBacked:
     def __len__(self) -> int:
         return len(self._frame)
 
-    def __iter__(self):
-        return iter(self._frame)
-
     def __contains__(self, item) -> bool:
         return item in self._frame
 
