@@ -125,9 +125,22 @@ class TestTemplateSimilarityCV:
         assert "eye_sim_diff" in result.columns
         assert ".cv_fold" in result.columns
 
-    def test_similarity_transform_raises(self):
+    def test_similarity_transform_with_coral(self):
         ref_tab, source_tab = _make_test_data()
-        with pytest.raises(NotImplementedError, match="does not yet support"):
+        from peyesim import coral_transform
+        result = template_similarity_cv(
+            ref_tab, source_tab, match_on="image",
+            n_folds=2, permutations=0,
+            similarity_transform=coral_transform,
+            similarity_transform_args={"comps": 4, "shrink": 1e-3},
+        )
+        assert "eye_sim" in result.columns
+        assert ".cv_fold" in result.columns
+        assert len(result) == len(source_tab)
+
+    def test_unsupported_transform_raises(self):
+        ref_tab, source_tab = _make_test_data()
+        with pytest.raises(ValueError, match="Unsupported transform"):
             template_similarity_cv(
                 ref_tab, source_tab, match_on="image",
                 similarity_transform=lambda **kw: {},

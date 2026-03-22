@@ -793,21 +793,13 @@ def template_similarity_cv(
 
     Notes
     -----
-    The *similarity_transform* path currently requires transforms that
-    expose separate fit / apply steps.  **This is not yet implemented** —
-    if *similarity_transform* is provided a ``NotImplementedError`` is
-    raised.  The no-transform path (cross-validated permutation baselines)
-    is fully functional.
+    The transform is fit on training folds only and applied to held-out
+    data, preventing data leakage. Supported transforms:
+    ``latent_pca_transform``, ``coral_transform``, ``cca_transform``,
+    ``contract_transform``, ``affine_transform``.
     """
-    if similarity_transform is not None:
-        # TODO: implement fit/apply separation for latent transforms
-        # (CORAL, CCA, PCA) so that we can fit on training folds and
-        # apply to the held-out fold without data leakage.
-        raise NotImplementedError(
-            "template_similarity_cv does not yet support similarity_transform. "
-            "Use template_similarity for transformed analyses, or omit the "
-            "transform to use cross-validated permutation baselines."
-        )
+    if similarity_transform_args is None:
+        similarity_transform_args = {}
 
     if split_on is None:
         split_on = match_on
@@ -870,9 +862,46 @@ def template_similarity_cv(
         train_rows = train_rows & ~leaky
 
         eval_source = source_tab.loc[eval_rows].reset_index(drop=True)
+        train_source = source_tab.loc[train_rows].reset_index(drop=True)
 
-        # For the no-transform path, ref_tab is used as-is
-        ref_eval = ref_tab
+        # Determine ref subsets
+        if isinstance(match_on, str):
+            eval_keys = set(source_tab.loc[eval_rows, match_on].unique())
+            train_keys = set(source_tab.loc[train_rows, match_on].unique())
+        else:
+            eval_keys = set(
+                source_tab.loc[eval_rows, match_on].apply(tuple, axis=1).unique()
+            )
+            train_keys = set(
+                source_tab.loc[train_rows, match_on].apply(tuple, axis=1).unique()
+            )
+
+        ref_eval = ref_tab[ref_tab[match_on].isin(eval_keys)].reset_index(drop=True)
+
+        # Apply transform if provided
+        fold_refvar = refvar
+        fold_sourcevar = sourcevar
+        if similarity_transform is not None:
+            from peyesim.latent_transforms import _fit_transform, _apply_transform
+            ref_train = ref_tab[ref_tab[match_on].isin(train_keys)].reset_index(drop=True)
+            if len(train_source) == 0 or len(ref_train) == 0:
+                raise ValueError(
+                    f"Fold {fold} has no training rows for transform fitting. "
+                    "Reduce n_folds or relax the fit filter."
+                )
+            model = _fit_transform(
+                similarity_transform, ref_train, train_source,
+                match_on, refvar=refvar, sourcevar=sourcevar,
+                **similarity_transform_args,
+            )
+            transformed = _apply_transform(
+                model, ref_eval, eval_source,
+                refvar=refvar, sourcevar=sourcevar,
+            )
+            ref_eval = transformed["ref_tab"]
+            eval_source = transformed["source_tab"]
+            fold_refvar = transformed.get("refvar", refvar)
+            fold_sourcevar = transformed.get("sourcevar", sourcevar)
 
         fold_res = _run_similarity_analysis(
             ref_eval,
@@ -881,8 +910,8 @@ def template_similarity_cv(
             permutations,
             permute_on,
             method,
-            refvar,
-            sourcevar,
+            fold_refvar,
+            fold_sourcevar,
             multiscale_aggregation=multiscale_aggregation,
             **kwargs,
         )

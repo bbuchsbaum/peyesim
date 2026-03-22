@@ -222,6 +222,237 @@ def cca_transform(
 # Geometric density transforms (operate in 2-D coordinate space)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Fit / Apply separation for cross-validated transforms
+# ---------------------------------------------------------------------------
+
+def _fit_transform(similarity_transform, ref_tab, source_tab, match_on,
+                   refvar="density", sourcevar="density", **kwargs):
+    """Fit a similarity transform on training data and return a model dict.
+
+    The model dict contains enough information to project new data via
+    ``_apply_transform``.
+    """
+    # Identify which transform we're dealing with
+    _name = getattr(similarity_transform, "__name__", "")
+
+    if _name == "latent_pca_transform":
+        return _fit_pca_model(ref_tab, source_tab, refvar, sourcevar, **kwargs)
+    elif _name == "coral_transform":
+        return _fit_coral_model(ref_tab, source_tab, refvar, sourcevar, **kwargs)
+    elif _name == "cca_transform":
+        return _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar, **kwargs)
+    elif _name in ("contract_transform", "affine_transform"):
+        return _fit_geometric_model(
+            similarity_transform, ref_tab, source_tab, match_on,
+            refvar, sourcevar, **kwargs,
+        )
+    else:
+        raise ValueError(
+            f"Unsupported transform for fit/apply: {_name}. "
+            "Supported: latent_pca_transform, coral_transform, cca_transform, "
+            "contract_transform, affine_transform."
+        )
+
+
+def _apply_transform(model, ref_tab, source_tab, refvar="density",
+                     sourcevar="density"):
+    """Apply a fitted transform model to new (ref_tab, source_tab) data."""
+    kind = model["transform"]
+
+    if kind == "latent_pca":
+        return _apply_pca_model(model, ref_tab, source_tab, refvar, sourcevar)
+    elif kind == "coral":
+        return _apply_coral_model(model, ref_tab, source_tab, refvar, sourcevar)
+    elif kind == "cca":
+        return _apply_cca_model(model, ref_tab, source_tab, refvar, sourcevar)
+    elif kind in ("contract", "affine"):
+        return _apply_geometric_model(model, ref_tab, source_tab, refvar, sourcevar)
+    else:
+        raise ValueError(f"Unknown transform kind: {kind}")
+
+
+# --- PCA fit/apply ---
+
+def _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
+                   comps=30, center=True, scale=False, **_):
+    ref_vecs = [_vectorize_density(d) for d in ref_tab[refvar]]
+    src_vecs = [_vectorize_density(d) for d in source_tab[sourcevar]]
+    combined = np.vstack(ref_vecs + src_vecs)
+    n_components = min(comps, combined.shape[0], combined.shape[1])
+    mean = combined.mean(axis=0) if center else np.zeros(combined.shape[1])
+    pca = PCA(n_components=n_components)
+    centered = combined - mean if center else combined
+    pca.fit(centered)
+    return {"transform": "latent_pca", "pca": pca, "mean": mean,
+            "center": center, "scale": scale}
+
+
+def _apply_pca_model(model, ref_tab, source_tab, refvar, sourcevar):
+    pca = model["pca"]
+    mean = model["mean"]
+    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
+    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
+    ref_scores = pca.transform(ref_vecs - mean)
+    src_scores = pca.transform(src_vecs - mean)
+    ref_tab = ref_tab.copy()
+    source_tab = source_tab.copy()
+    ref_tab[refvar] = _split_rows(ref_scores)
+    source_tab[sourcevar] = _split_rows(src_scores)
+    return {"ref_tab": ref_tab, "source_tab": source_tab,
+            "refvar": refvar, "sourcevar": sourcevar,
+            "info": {"transform": "latent_pca"}}
+
+
+# --- CORAL fit/apply ---
+
+def _fit_coral_model(ref_tab, source_tab, refvar, sourcevar,
+                     comps=30, center=True, scale=False, shrink=1e-3, **_):
+    pca_model = _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
+                               comps=comps, center=center, scale=scale)
+    pca = pca_model["pca"]
+    mean = pca_model["mean"]
+    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
+    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
+    ref_scores = pca.transform(ref_vecs - mean)
+    src_scores = pca.transform(src_vecs - mean)
+    k = ref_scores.shape[1]
+    cov_ref = np.cov(ref_scores, rowvar=False) + np.eye(k) * shrink
+    cov_src = np.cov(src_scores, rowvar=False) + np.eye(k) * shrink
+
+    vals_src, vecs_src = np.linalg.eigh(cov_src)
+    inv_sqrt_src = vecs_src @ np.diag(1.0 / np.sqrt(np.maximum(vals_src, shrink))) @ vecs_src.T
+    vals_ref, vecs_ref = np.linalg.eigh(cov_ref)
+    sqrt_ref = vecs_ref @ np.diag(np.sqrt(np.maximum(vals_ref, 0))) @ vecs_ref.T
+    adapt = inv_sqrt_src @ sqrt_ref
+
+    return {"transform": "coral", "pca": pca, "mean": mean,
+            "adapt": adapt, "shrink": shrink, "center": center}
+
+
+def _apply_coral_model(model, ref_tab, source_tab, refvar, sourcevar):
+    pca = model["pca"]
+    mean = model["mean"]
+    adapt = model["adapt"]
+    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
+    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
+    ref_scores = pca.transform(ref_vecs - mean)
+    src_scores = pca.transform(src_vecs - mean)
+    adapted_src = (adapt @ src_scores.T).T
+    ref_tab = ref_tab.copy()
+    source_tab = source_tab.copy()
+    ref_tab[refvar] = _split_rows(ref_scores)
+    source_tab[sourcevar] = _split_rows(adapted_src)
+    return {"ref_tab": ref_tab, "source_tab": source_tab,
+            "refvar": refvar, "sourcevar": sourcevar,
+            "info": {"transform": "coral"}}
+
+
+# --- CCA fit/apply ---
+
+def _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar,
+                   comps=10, center=True, scale=False, shrink=1e-3, **_):
+    pca_model = _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
+                               comps=comps, center=center, scale=scale)
+    pca = pca_model["pca"]
+    mean = pca_model["mean"]
+    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
+    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
+    ref_scores = pca.transform(ref_vecs - mean)
+    src_scores = pca.transform(src_vecs - mean)
+    k_use = min(ref_scores.shape[1], comps,
+                ref_scores.shape[0] - 1, src_scores.shape[0] - 1)
+    if k_use < 1:
+        return {"transform": "cca", "pca": pca, "mean": mean,
+                "cca_model": None, "k_use": 0, "shrink": shrink}
+
+    from sklearn.cross_decomposition import CCA
+    cca = CCA(n_components=k_use, max_iter=1000)
+
+    def _prep(mat, k):
+        mat_k = mat[:, :k]
+        v = np.var(mat_k, axis=0, ddof=1)
+        sds = np.sqrt(np.maximum(v, 0) + shrink)
+        m = mat_k.mean(axis=0)
+        return (mat_k - m) / sds, m, sds
+
+    X, x_mean, x_sd = _prep(ref_scores, k_use)
+    Y, y_mean, y_sd = _prep(src_scores, k_use)
+    cca.fit(X, Y)
+    return {"transform": "cca", "pca": pca, "mean": mean,
+            "cca_model": cca, "k_use": k_use, "shrink": shrink,
+            "x_mean": x_mean, "x_sd": x_sd, "y_mean": y_mean, "y_sd": y_sd}
+
+
+def _apply_cca_model(model, ref_tab, source_tab, refvar, sourcevar):
+    pca = model["pca"]
+    mean = model["mean"]
+    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
+    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
+    ref_scores = pca.transform(ref_vecs - mean)
+    src_scores = pca.transform(src_vecs - mean)
+
+    ref_tab = ref_tab.copy()
+    source_tab = source_tab.copy()
+
+    if model["cca_model"] is None:
+        ref_tab[refvar] = _split_rows(ref_scores)
+        source_tab[sourcevar] = _split_rows(src_scores)
+    else:
+        k = model["k_use"]
+        X = (ref_scores[:, :k] - model["x_mean"]) / model["x_sd"]
+        Y = (src_scores[:, :k] - model["y_mean"]) / model["y_sd"]
+        X_c, Y_c = model["cca_model"].transform(X, Y)
+        ref_tab[refvar] = _split_rows(X_c)
+        source_tab[sourcevar] = _split_rows(Y_c)
+
+    return {"ref_tab": ref_tab, "source_tab": source_tab,
+            "refvar": refvar, "sourcevar": sourcevar,
+            "info": {"transform": "cca"}}
+
+
+# --- Geometric (contract/affine) fit/apply ---
+
+def _fit_geometric_model(transform_fn, ref_tab, source_tab, match_on,
+                         refvar, sourcevar, shrink=1e-6, **_):
+    ref_densities, src_densities = _match_pairs(
+        ref_tab, source_tab, match_on, refvar, sourcevar)
+    ref_mean, ref_cov = _aggregate_density_moments(ref_densities)
+    src_mean, src_cov = _aggregate_density_moments(src_densities)
+    name = getattr(transform_fn, "__name__", "")
+    if name == "contract_transform":
+        s = np.sqrt((np.trace(ref_cov) + shrink) / (np.trace(src_cov) + shrink))
+        A = s * np.eye(2)
+        kind = "contract"
+    else:
+        A = _mat_sqrt_2d(ref_cov + shrink * np.eye(2)) @ _mat_inv_sqrt_2d(
+            src_cov + shrink * np.eye(2), shrink=shrink)
+        kind = "affine"
+    t = ref_mean - A @ src_mean
+    return {"transform": kind, "A": A, "t": t, "shrink": shrink}
+
+
+def _apply_geometric_model(model, ref_tab, source_tab, refvar, sourcevar):
+    A = model["A"]
+    t = model["t"]
+    source_tab = source_tab.copy()
+    new_densities = []
+    for d in source_tab[sourcevar]:
+        if isinstance(d, EyeDensityMultiscale):
+            new_densities.append(EyeDensityMultiscale(
+                scales=[_warp_density(s, A, t) for s in d]))
+        else:
+            new_densities.append(_warp_density(d, A, t))
+    source_tab[sourcevar] = new_densities
+    return {"ref_tab": ref_tab, "source_tab": source_tab,
+            "refvar": refvar, "sourcevar": sourcevar,
+            "info": {"transform": model["transform"]}}
+
+
+# ---------------------------------------------------------------------------
+# Geometric density transforms (operate in 2-D coordinate space)
+# ---------------------------------------------------------------------------
+
 def _density_moments(dens: EyeDensity):
     """Compute weighted mean and covariance of an EyeDensity in (x, y) space.
 
