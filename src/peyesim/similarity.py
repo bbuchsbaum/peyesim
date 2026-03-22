@@ -13,6 +13,7 @@ from scipy.stats import spearmanr
 from peyesim._utils import emdw as _emdw, match_keys, filter_unmatched
 from peyesim.density import EyeDensity, EyeDensityMultiscale
 from peyesim.fixations import FixationGroup
+from peyesim.saccades import Scanpath
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +189,29 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
     if isinstance(x, EyeDensity):
         return compute_similarity(x, y, method=method, saliency_map=saliency_map)
 
-    # fixation_group → not supported as direct similarity here (use fixation_similarity)
+    # Scanpath (must check before FixationGroup since Scanpath inherits from it)
+    if isinstance(x, Scanpath) and isinstance(y, Scanpath):
+        if method == "multimatch":
+            from peyesim.multimatch import multi_match
+            screensize = kwargs.pop("screensize", (1024, 768))
+            return multi_match(x, y, screensize=screensize)
+        # Fall through to fixation-level methods
+
+    # FixationGroup
+    if isinstance(x, FixationGroup) and isinstance(y, FixationGroup):
+        if method == "overlap":
+            from peyesim.overlap import fixation_overlap
+            time_samples = kwargs.pop("time_samples", None)
+            result = fixation_overlap(x, y, time_samples=time_samples, **kwargs)
+            return result["perc"]
+        elif method == "sinkhorn":
+            coords_x = x[["x", "y"]].values
+            coords_y = y[["x", "y"]].values
+            wx = np.ones(len(x)) / len(x)
+            wy = np.ones(len(y)) / len(y)
+            dist = _emdw(coords_x, wx, coords_y, wy)
+            return 1.0 / (1.0 + dist)
+
     # Default: numeric vectors
     return compute_similarity(x, y, method=method, saliency_map=saliency_map)
 
@@ -482,15 +505,18 @@ def _run_similarity_analysis(
     ref_data = ref_tab[refvar].values
     src_data = source_tab[sourcevar].values
 
+    # Detect if method returns dict (e.g. multimatch)
+    is_dict_method = method == "multimatch"
+
     for i, mi in enumerate(matchind):
         d1 = ref_data[mi]
         d2 = src_data[i]
 
         if d1 is None or d2 is None:
-            eye_sim_list.append(np.nan)
+            eye_sim_list.append(np.nan if not is_dict_method else None)
             if permutations > 0:
-                perm_sim_list.append(np.nan)
-                diff_list.append(np.nan)
+                perm_sim_list.append(np.nan if not is_dict_method else None)
+                diff_list.append(np.nan if not is_dict_method else None)
             continue
 
         sim = similarity(d1, d2, method=method,
@@ -511,43 +537,73 @@ def _run_similarity_analysis(
 
             if len(mind) == 0:
                 warnings.warn("no matching candidate indices for permutation test. Skipping.")
-                eye_sim_list.append(sim if np.isscalar(sim) else sim)
-                perm_sim_list.append(np.nan)
-                diff_list.append(np.nan)
+                eye_sim_list.append(sim)
+                perm_sim_list.append(np.nan if not is_dict_method else None)
+                diff_list.append(np.nan if not is_dict_method else None)
                 continue
 
             psims = []
             for j in mind:
                 d1p = ref_data[j]
                 if d1p is None:
-                    psims.append(np.nan)
+                    psims.append(np.nan if not is_dict_method else None)
                 else:
                     ps = similarity(d1p, d2, method=method,
                                     multiscale_aggregation=multiscale_aggregation, **kwargs)
                     psims.append(ps)
 
-            perm_mean = float(np.nanmean(psims))
+            if is_dict_method:
+                # Average each metric across permutations
+                valid_psims = [p for p in psims if isinstance(p, dict)]
+                if valid_psims:
+                    perm_mean = {k: float(np.nanmean([p[k] for p in valid_psims]))
+                                 for k in valid_psims[0]}
+                else:
+                    perm_mean = None
+            else:
+                perm_mean = float(np.nanmean(psims))
 
-            if np.isscalar(sim):
-                eye_sim_list.append(sim)
-                perm_sim_list.append(perm_mean)
-                diff_list.append(sim - perm_mean)
+            eye_sim_list.append(sim)
+            perm_sim_list.append(perm_mean)
+
+            if is_dict_method:
+                if isinstance(sim, dict) and isinstance(perm_mean, dict):
+                    diff_list.append({k: sim[k] - perm_mean[k] for k in sim})
+                else:
+                    diff_list.append(None)
             else:
-                # Vector result (multiscale with aggregation='none')
-                eye_sim_list.append(sim)
-                perm_sim_list.append(perm_mean)
-                diff_list.append(np.nanmean(sim) - perm_mean if not np.isnan(perm_mean) else np.nan)
+                if np.isscalar(sim):
+                    diff_list.append(sim - perm_mean)
+                else:
+                    diff_list.append(np.nanmean(sim) - perm_mean if not np.isnan(perm_mean) else np.nan)
         else:
-            if np.isscalar(sim):
-                eye_sim_list.append(sim)
-            else:
-                eye_sim_list.append(sim)
+            eye_sim_list.append(sim)
 
     result = source_tab.copy()
-    result["eye_sim"] = eye_sim_list
-    if permutations > 0:
-        result["perm_sim"] = perm_sim_list
-        result["eye_sim_diff"] = diff_list
+
+    if is_dict_method:
+        # Expand dict results into separate columns (e.g. mm_vector, mm_direction, ...)
+        mm_keys = None
+        for s in eye_sim_list:
+            if isinstance(s, dict):
+                mm_keys = list(s.keys())
+                break
+        if mm_keys:
+            for k in mm_keys:
+                result[k] = [s[k] if isinstance(s, dict) else np.nan for s in eye_sim_list]
+            if permutations > 0:
+                for k in mm_keys:
+                    result[f"{k}_perm"] = [
+                        s[k] if isinstance(s, dict) else np.nan for s in perm_sim_list
+                    ]
+                    result[f"{k}_diff"] = [
+                        s[k] if isinstance(s, dict) else np.nan for s in diff_list
+                    ]
+    else:
+        result["eye_sim"] = eye_sim_list
+        if permutations > 0:
+            result["perm_sim"] = perm_sim_list
+            result["eye_sim_diff"] = diff_list
 
     return result
 
