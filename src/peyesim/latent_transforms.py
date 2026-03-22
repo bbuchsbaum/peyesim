@@ -1,4 +1,4 @@
-"""Latent-space transforms for template-based similarity (PCA, CORAL, CCA)."""
+"""Latent-space transforms for template-based similarity (PCA, CORAL, CCA, geometric)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from scipy.interpolate import RegularGridInterpolator
 from sklearn.decomposition import PCA
 
 from peyesim.density import EyeDensity, EyeDensityMultiscale
@@ -214,4 +215,234 @@ def cca_transform(
         "sourcevar": sourcevar,
         "info": {"transform": "cca", "comps": k_use, "center": center,
                  "scale": scale, "shrink": shrink},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Geometric density transforms (operate in 2-D coordinate space)
+# ---------------------------------------------------------------------------
+
+def _density_moments(dens: EyeDensity):
+    """Compute weighted mean and covariance of an EyeDensity in (x, y) space.
+
+    Returns (mean_xy [2], cov_xy [2,2]).
+    """
+    xx, yy = np.meshgrid(dens.x, dens.y, indexing="ij")
+    w = np.maximum(dens.z, 0).ravel()
+    total = w.sum()
+    if total < 1e-30:
+        # Uniform fallback
+        mx = dens.x.mean()
+        my = dens.y.mean()
+        return np.array([mx, my]), np.eye(2)
+    xf = xx.ravel()
+    yf = yy.ravel()
+    mx = np.dot(w, xf) / total
+    my = np.dot(w, yf) / total
+    dx = xf - mx
+    dy = yf - my
+    cxx = np.dot(w, dx * dx) / total
+    cxy = np.dot(w, dx * dy) / total
+    cyy = np.dot(w, dy * dy) / total
+    return np.array([mx, my]), np.array([[cxx, cxy], [cxy, cyy]])
+
+
+def _aggregate_density_moments(density_list):
+    """Aggregate weighted mean and covariance across a list of EyeDensity objects.
+
+    Returns (mean_xy [2], cov_xy [2,2]).
+    """
+    means = []
+    covs = []
+    weights = []
+    for d in density_list:
+        if isinstance(d, EyeDensityMultiscale):
+            d = d[0]
+        m, c = _density_moments(d)
+        w = np.maximum(d.z, 0).sum()
+        means.append(m)
+        covs.append(c)
+        weights.append(w)
+    means = np.array(means)
+    weights = np.array(weights)
+    total = weights.sum()
+    if total < 1e-30:
+        return means.mean(axis=0), np.eye(2)
+    # Weighted aggregate mean
+    agg_mean = (weights[:, None] * means).sum(axis=0) / total
+    # Weighted aggregate covariance (within + between components)
+    agg_cov = np.zeros((2, 2))
+    for m, c, w in zip(means, covs, weights):
+        d = m - agg_mean
+        agg_cov += w * (c + np.outer(d, d))
+    agg_cov /= total
+    return agg_mean, agg_cov
+
+
+def _mat_sqrt_2d(m):
+    """Matrix square root of a 2x2 symmetric positive-semi-definite matrix."""
+    vals, vecs = np.linalg.eigh(m)
+    return vecs @ np.diag(np.sqrt(np.maximum(vals, 0.0))) @ vecs.T
+
+
+def _mat_inv_sqrt_2d(m, shrink=1e-6):
+    """Inverse matrix square root of a 2x2 symmetric matrix with shrinkage."""
+    vals, vecs = np.linalg.eigh(m)
+    return vecs @ np.diag(1.0 / np.sqrt(np.maximum(vals, shrink))) @ vecs.T
+
+
+def _warp_density(dens: EyeDensity, A: np.ndarray, t: np.ndarray) -> EyeDensity:
+    """Apply affine transform (A, t) to an EyeDensity's coordinate grid.
+
+    The new density is obtained by interpolating the original density onto
+    the transformed grid: new_coords = A @ old_coords + t.
+    """
+    # Transform the 1-D grid vectors
+    # For a regular grid we transform each grid point and interpolate back
+    xx, yy = np.meshgrid(dens.x, dens.y, indexing="ij")
+    new_xx = A[0, 0] * xx + A[0, 1] * yy + t[0]
+    new_yy = A[1, 0] * xx + A[1, 1] * yy + t[1]
+
+    # Build interpolator on original grid
+    interp = RegularGridInterpolator(
+        (dens.x, dens.y), dens.z,
+        method="linear", bounds_error=False, fill_value=0.0,
+    )
+
+    # We want the density at the NEW grid positions, but the density values
+    # "move" with the coordinates. The correct approach: the transformed
+    # source density at position p is the original density at A^{-1}(p - t).
+    # But since we are warping source to match reference, we evaluate original
+    # density at positions that map TO the new grid.
+    #
+    # Simpler: create a new EyeDensity whose grid spans the warped extent
+    # and sample the original density at the inverse-mapped positions.
+    #
+    # For template_similarity the grids need to match ref grids, so we keep
+    # the same grid vectors as the original and pull back:
+    try:
+        A_inv = np.linalg.inv(A)
+    except np.linalg.LinAlgError:
+        return dens  # degenerate; return unchanged
+
+    # For each point on the ORIGINAL grid, find where it came from in source
+    # source_pos = A_inv @ (grid_pos - t)
+    pts = np.column_stack([xx.ravel(), yy.ravel()])
+    src_pts = (A_inv @ (pts - t).T).T
+    new_z = interp(src_pts).reshape(dens.z.shape)
+
+    return EyeDensity(
+        x=dens.x.copy(), y=dens.y.copy(), z=new_z,
+        sigma=dens.sigma, fixgroup=dens.fixgroup,
+    )
+
+
+def _match_pairs(ref_tab, source_tab, match_on, refvar, sourcevar):
+    """Return matched lists of (ref_density, source_density) based on match_on."""
+    if match_on is None:
+        # Positional matching
+        ref_densities = list(ref_tab[refvar])
+        src_densities = list(source_tab[sourcevar])
+        n = min(len(ref_densities), len(src_densities))
+        return ref_densities[:n], src_densities[:n]
+    merged = pd.merge(
+        ref_tab[[match_on, refvar]].rename(columns={refvar: "_ref_d"}),
+        source_tab[[match_on, sourcevar]].rename(columns={sourcevar: "_src_d"}),
+        on=match_on,
+    )
+    return list(merged["_ref_d"]), list(merged["_src_d"])
+
+
+def contract_transform(
+    ref_tab: pd.DataFrame,
+    source_tab: pd.DataFrame,
+    match_on: str | None = None,
+    refvar: str = "density",
+    sourcevar: str = "density",
+    shrink: float = 1e-6,
+    **kwargs,
+) -> dict:
+    """Uniform-scaling geometric transform matching spatial spread of source to reference.
+
+    Fits a scalar scaling factor so that the trace of the source covariance
+    matches the trace of the reference covariance, then applies the
+    corresponding affine warp to the source densities.
+    """
+    ref_densities, src_densities = _match_pairs(
+        ref_tab, source_tab, match_on, refvar, sourcevar,
+    )
+
+    ref_mean, ref_cov = _aggregate_density_moments(ref_densities)
+    src_mean, src_cov = _aggregate_density_moments(src_densities)
+
+    scale = np.sqrt(
+        (np.trace(ref_cov) + shrink) / (np.trace(src_cov) + shrink)
+    )
+    A = scale * np.eye(2)
+    t = ref_mean - A @ src_mean
+
+    # Warp source densities
+    source_tab = source_tab.copy()
+    new_densities = []
+    for d in source_tab[sourcevar]:
+        if isinstance(d, EyeDensityMultiscale):
+            new_scales = [_warp_density(s, A, t) for s in d]
+            new_densities.append(EyeDensityMultiscale(scales=new_scales))
+        else:
+            new_densities.append(_warp_density(d, A, t))
+    source_tab[sourcevar] = new_densities
+
+    return {
+        "ref_tab": ref_tab,
+        "source_tab": source_tab,
+        "refvar": refvar,
+        "sourcevar": sourcevar,
+        "info": {"transform": "contract", "scale": scale,
+                 "A": A, "t": t, "shrink": shrink},
+    }
+
+
+def affine_transform(
+    ref_tab: pd.DataFrame,
+    source_tab: pd.DataFrame,
+    match_on: str | None = None,
+    refvar: str = "density",
+    sourcevar: str = "density",
+    shrink: float = 1e-6,
+    **kwargs,
+) -> dict:
+    """Full affine (rotation+scale+shear) geometric transform.
+
+    Fits ``A = sqrtm(ref_cov + shrink*I) @ inv_sqrtm(src_cov + shrink*I)``
+    and ``t = ref_mean - A @ src_mean``, then warps the source densities.
+    """
+    ref_densities, src_densities = _match_pairs(
+        ref_tab, source_tab, match_on, refvar, sourcevar,
+    )
+
+    ref_mean, ref_cov = _aggregate_density_moments(ref_densities)
+    src_mean, src_cov = _aggregate_density_moments(src_densities)
+
+    A = _mat_sqrt_2d(ref_cov + shrink * np.eye(2)) @ _mat_inv_sqrt_2d(
+        src_cov + shrink * np.eye(2), shrink=shrink,
+    )
+    t = ref_mean - A @ src_mean
+
+    # Warp source densities
+    source_tab = source_tab.copy()
+    new_densities = []
+    for d in source_tab[sourcevar]:
+        if isinstance(d, EyeDensityMultiscale):
+            new_scales = [_warp_density(s, A, t) for s in d]
+            new_densities.append(EyeDensityMultiscale(scales=new_scales))
+        else:
+            new_densities.append(_warp_density(d, A, t))
+    source_tab[sourcevar] = new_densities
+
+    return {
+        "ref_tab": ref_tab,
+        "source_tab": source_tab,
+        "refvar": refvar,
+        "sourcevar": sourcevar,
+        "info": {"transform": "affine", "A": A, "t": t, "shrink": shrink},
     }

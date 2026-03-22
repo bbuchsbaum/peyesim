@@ -27,6 +27,7 @@ from peyesim.similarity import (
     similarity,
     compute_similarity,
     template_similarity,
+    template_similarity_cv,
     fixation_similarity,
     scanpath_similarity,
     sample_density,
@@ -39,7 +40,10 @@ from peyesim.latent_transforms import (
     latent_pca_transform,
     coral_transform,
     cca_transform,
+    contract_transform,
+    affine_transform,
 )
+from peyesim.entropy import fixation_entropy, entropy_from_mass
 from peyesim.repetitive_similarity import repetitive_similarity
 from peyesim.visualization import anim_scanpath
 
@@ -74,6 +78,7 @@ __all__ = [
     "similarity",
     "compute_similarity",
     "template_similarity",
+    "template_similarity_cv",
     "fixation_similarity",
     "scanpath_similarity",
     "sample_density",
@@ -87,5 +92,9 @@ __all__ = [
     "latent_pca_transform",
     "coral_transform",
     "cca_transform",
+    "contract_transform",
+    "affine_transform",
+    "fixation_entropy",
+    "entropy_from_mass",
     "repetitive_similarity",
 ]

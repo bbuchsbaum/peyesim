@@ -686,3 +686,216 @@ def scanpath_similarity(
         ref_tab, source_tab, match_on, permutations, permute_on,
         method, refvar, sourcevar, window=window, **kwargs
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-validated template similarity
+# ---------------------------------------------------------------------------
+
+def _make_cv_folds(
+    source_tab: pd.DataFrame,
+    split_on: str | list[str],
+    n_folds: int | None = None,
+    seed: int = 1,
+) -> dict:
+    """Assign CV fold IDs based on unique groups in *split_on* columns.
+
+    Returns
+    -------
+    dict
+        ``fold_ids`` – integer array (same length as *source_tab*) with fold
+        assignments (0-based), and ``n_folds``.
+    """
+    if isinstance(split_on, str):
+        split_on = [split_on]
+
+    # Build a group key per row
+    group_keys = source_tab[split_on].apply(
+        lambda row: tuple(row), axis=1
+    )
+    unique_groups = list(group_keys.unique())
+
+    if len(unique_groups) < 2:
+        raise ValueError(
+            f"Need at least 2 unique groups in split_on columns to create "
+            f"CV folds, got {len(unique_groups)}."
+        )
+
+    if n_folds is None:
+        n_folds = min(5, len(unique_groups))
+    if n_folds < 2:
+        raise ValueError("n_folds must be >= 2.")
+    if n_folds > len(unique_groups):
+        raise ValueError(
+            f"n_folds ({n_folds}) exceeds unique groups ({len(unique_groups)})."
+        )
+
+    # Shuffle unique groups deterministically and assign round-robin
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(unique_groups))
+    group_to_fold = {}
+    for rank, idx in enumerate(order):
+        group_to_fold[unique_groups[idx]] = rank % n_folds
+
+    fold_ids = np.array([group_to_fold[g] for g in group_keys], dtype=int)
+    return {"fold_ids": fold_ids, "n_folds": n_folds}
+
+
+def template_similarity_cv(
+    ref_tab: pd.DataFrame,
+    source_tab: pd.DataFrame,
+    match_on: str,
+    permute_on: str | None = None,
+    refvar: str = "density",
+    sourcevar: str = "density",
+    method: str = "spearman",
+    permutations: int = 10,
+    multiscale_aggregation: str = "mean",
+    similarity_transform=None,
+    similarity_transform_args: dict | None = None,
+    split_on: str | list[str] | None = None,
+    n_folds: int | None = None,
+    seed: int = 1,
+    fit_source_filter=None,
+    eval_source_filter=None,
+    **kwargs,
+) -> pd.DataFrame:
+    """Cross-validated template similarity (mirrors R ``template_similarity_cv``).
+
+    When a *similarity_transform* is used (e.g. CORAL, CCA, PCA), the
+    transform should not be fit and evaluated on the same data.  This
+    function splits *source_tab* into folds, fits the transform on the
+    training folds, and evaluates similarity on the held-out fold.
+
+    Parameters
+    ----------
+    ref_tab, source_tab, match_on, permute_on, refvar, sourcevar, method,
+    permutations, multiscale_aggregation, similarity_transform,
+    similarity_transform_args
+        Same as :func:`template_similarity`.
+    split_on : str or list[str], optional
+        Column(s) used to define CV groups.  Defaults to *match_on*.
+    n_folds : int, optional
+        Number of CV folds (default ``min(5, n_groups)``).
+    seed : int
+        Random seed for fold assignment.
+    fit_source_filter : callable or array-like of bool, optional
+        Boolean mask or callable ``(source_tab) -> bool array`` selecting
+        rows eligible for the **training** set of the transform fit.
+    eval_source_filter : callable or array-like of bool, optional
+        Boolean mask or callable ``(source_tab) -> bool array`` selecting
+        rows eligible for **evaluation**.
+
+    Returns
+    -------
+    pd.DataFrame
+        Concatenated per-fold results with an extra ``".cv_fold"`` column.
+
+    Notes
+    -----
+    The *similarity_transform* path currently requires transforms that
+    expose separate fit / apply steps.  **This is not yet implemented** —
+    if *similarity_transform* is provided a ``NotImplementedError`` is
+    raised.  The no-transform path (cross-validated permutation baselines)
+    is fully functional.
+    """
+    if similarity_transform is not None:
+        # TODO: implement fit/apply separation for latent transforms
+        # (CORAL, CCA, PCA) so that we can fit on training folds and
+        # apply to the held-out fold without data leakage.
+        raise NotImplementedError(
+            "template_similarity_cv does not yet support similarity_transform. "
+            "Use template_similarity for transformed analyses, or omit the "
+            "transform to use cross-validated permutation baselines."
+        )
+
+    if split_on is None:
+        split_on = match_on
+
+    # Add row IDs for reassembly
+    source_tab = source_tab.copy()
+    source_tab["__cv_row_id__"] = np.arange(len(source_tab))
+
+    # Resolve filters
+    if fit_source_filter is not None:
+        if callable(fit_source_filter):
+            fit_mask = np.asarray(fit_source_filter(source_tab), dtype=bool)
+        else:
+            fit_mask = np.asarray(fit_source_filter, dtype=bool)
+    else:
+        fit_mask = np.ones(len(source_tab), dtype=bool)
+
+    if eval_source_filter is not None:
+        if callable(eval_source_filter):
+            eval_mask = np.asarray(eval_source_filter(source_tab), dtype=bool)
+        else:
+            eval_mask = np.asarray(eval_source_filter, dtype=bool)
+    else:
+        eval_mask = np.ones(len(source_tab), dtype=bool)
+
+    # Build folds
+    cv = _make_cv_folds(source_tab, split_on, n_folds=n_folds, seed=seed)
+    fold_ids = cv["fold_ids"]
+    n_folds_actual = cv["n_folds"]
+
+    fold_results = []
+
+    for fold in range(n_folds_actual):
+        in_fold = fold_ids == fold
+
+        # Eval rows: in this fold AND pass eval_mask
+        eval_rows = in_fold & eval_mask
+        if not eval_rows.any():
+            continue
+
+        # Training candidate rows: NOT in this fold AND pass fit_mask
+        train_rows = (~in_fold) & fit_mask
+
+        # Remove from training any rows whose match_on key appears in eval
+        # set to prevent data leakage
+        if isinstance(match_on, str):
+            eval_keys = set(source_tab.loc[eval_rows, match_on].unique())
+            leaky = source_tab[match_on].isin(eval_keys)
+        else:
+            eval_key_tuples = set(
+                source_tab.loc[eval_rows, match_on]
+                .apply(tuple, axis=1)
+                .unique()
+            )
+            leaky = (
+                source_tab[match_on]
+                .apply(tuple, axis=1)
+                .isin(eval_key_tuples)
+            )
+        train_rows = train_rows & ~leaky
+
+        eval_source = source_tab.loc[eval_rows].reset_index(drop=True)
+
+        # For the no-transform path, ref_tab is used as-is
+        ref_eval = ref_tab
+
+        fold_res = _run_similarity_analysis(
+            ref_eval,
+            eval_source,
+            match_on,
+            permutations,
+            permute_on,
+            method,
+            refvar,
+            sourcevar,
+            multiscale_aggregation=multiscale_aggregation,
+            **kwargs,
+        )
+        fold_res[".cv_fold"] = fold
+        fold_results.append(fold_res)
+
+    if not fold_results:
+        raise ValueError("No folds produced any evaluation rows.")
+
+    result = pd.concat(fold_results, ignore_index=True)
+
+    # Sort by original row order and drop helper column
+    result = result.sort_values("__cv_row_id__").reset_index(drop=True)
+    result = result.drop(columns=["__cv_row_id__"])
+
+    return result
