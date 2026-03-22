@@ -151,3 +151,97 @@ class TestFixationEntropyFixationGroup:
     def test_invalid_type_raises(self):
         with pytest.raises(TypeError):
             fixation_entropy("not_a_valid_input")
+
+
+# ── Ported from R test_fixation_entropy.R ─────────────────────────────
+
+
+class TestFixationEntropyScalingInvariance:
+    def test_fixation_entropy_scaling_invariance(self):
+        """Entropy should be invariant to density scaling (multiplying z by a constant)."""
+        z1 = np.array([[1, 2], [3, 4]], dtype=float)
+        z2 = z1 * 10
+        ed1 = EyeDensity(x=np.array([0, 1.0]), y=np.array([0, 1.0]), z=z1, sigma=1.0)
+        ed2 = EyeDensity(x=np.array([0, 1.0]), y=np.array([0, 1.0]), z=z2, sigma=1.0)
+        assert abs(fixation_entropy(ed1) - fixation_entropy(ed2)) < 1e-12
+
+
+class TestGridEntropyAnalyticProbabilities:
+    def test_grid_entropy_analytic_probabilities(self):
+        """Grid entropy with 2 occupied cells of equal count should be log(2)/log(4) normalized."""
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.1, 0.2, 0.8, 0.85],
+            "y": [0.1, 0.2, 0.8, 0.85],
+            "onset": [0.0, 100.0, 200.0, 300.0],
+            "duration": [100.0, 100.0, 100.0, 100.0],
+        }))
+        # 2x2 grid, 2 occupied cells with 2 fixations each -> p=[0.5, 0.5]
+        # unnormalized entropy base 2: -2*(0.5*log2(0.5)) = 1.0
+        ent = fixation_entropy(fg, method="grid", grid_size=(2, 2),
+                               xbounds=(0, 1), ybounds=(0, 1),
+                               normalize=False, base=2)
+        assert abs(ent - 1.0) < 1e-10
+        # normalized: 1.0 / log2(4) = 0.5
+        ent_norm = fixation_entropy(fg, method="grid", grid_size=(2, 2),
+                                    xbounds=(0, 1), ybounds=(0, 1),
+                                    normalize=True, base=2)
+        assert abs(ent_norm - 0.5) < 1e-10
+
+
+class TestGridEntropyOrderInvariance:
+    def test_grid_entropy_order_invariance(self):
+        """Grid entropy should not depend on fixation order."""
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.1, 0.2, 0.8, 0.85, 0.55],
+            "y": [0.1, 0.2, 0.8, 0.85, 0.45],
+            "onset": [0.0, 100.0, 200.0, 300.0, 400.0],
+            "duration": [100.0] * 5,
+        }))
+        fg_shuf = FixationGroup(pd.DataFrame({
+            "x": [0.55, 0.8, 0.1, 0.85, 0.2],
+            "y": [0.45, 0.8, 0.1, 0.85, 0.2],
+            "onset": [0.0, 100.0, 200.0, 300.0, 400.0],
+            "duration": [100.0] * 5,
+        }))
+        ent1 = fixation_entropy(fg, method="grid", grid_size=(3, 3),
+                                xbounds=(0, 1), ybounds=(0, 1))
+        ent2 = fixation_entropy(fg_shuf, method="grid", grid_size=(3, 3),
+                                xbounds=(0, 1), ybounds=(0, 1))
+        assert abs(ent1 - ent2) < 1e-10
+
+
+class TestFixationEntropyNormalizedRange:
+    def test_fixation_entropy_normalized_in_unit_range(self):
+        """Normalized entropy should be in [0, 1]."""
+        rng = np.random.default_rng(123)
+        fg = FixationGroup(pd.DataFrame({
+            "x": rng.uniform(0, 1, 25),
+            "y": rng.uniform(0, 1, 25),
+            "onset": np.arange(0, 2500, 100, dtype=float),
+            "duration": np.full(25, 100.0),
+        }))
+        ent_grid = fixation_entropy(fg, method="grid", grid_size=(5, 5),
+                                    xbounds=(0, 1), ybounds=(0, 1))
+        ent_dens = fixation_entropy(fg, method="density", sigma=0.1,
+                                    xbounds=(0, 1), ybounds=(0, 1),
+                                    outdim=(25, 25))
+        assert 0 <= ent_grid <= 1
+        assert 0 <= ent_dens <= 1
+
+
+class TestFixationGroupDensityEntropyMatchesEyeDensity:
+    def test_fixation_group_density_entropy_matches_eye_density(self):
+        """Computing entropy via fixation_group(method='density') should match direct EyeDensity entropy."""
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.2, 0.25, 0.75, 0.8],
+            "y": [0.2, 0.25, 0.75, 0.8],
+            "onset": [0.0, 100.0, 200.0, 300.0],
+            "duration": [100.0] * 4,
+        }))
+        dens = eye_density(fg, sigma=0.08, xbounds=(0, 1), ybounds=(0, 1),
+                           outdim=(30, 30))
+        ent_fg = fixation_entropy(fg, method="density", sigma=0.08,
+                                  xbounds=(0, 1), ybounds=(0, 1),
+                                  outdim=(30, 30))
+        ent_dens = fixation_entropy(dens)
+        assert abs(ent_fg - ent_dens) < 1e-12

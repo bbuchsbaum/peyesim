@@ -174,3 +174,33 @@ def test_similarity_forwards_time_samples():
     result = similarity(fg1, fg2, method="overlap",
                         time_samples=np.arange(0, 200, 10))
     assert isinstance(result, float)
+
+
+# ---- Ported from R: identical fixation groups -> overlap similarity of 1.0 ----
+
+def test_fixation_similarity_overlap_identical_returns_one():
+    """Identical fixation groups should produce high overlap similarity."""
+    rng = np.random.default_rng(55)
+    rows = []
+    for trial in ["t1", "t2", "t3"]:
+        nfix = 8
+        # Use contiguous fixations that cover time range densely
+        durations = np.full(nfix, 100.0)
+        onsets = np.arange(nfix, dtype=float) * 100  # 0, 100, 200, ...
+        rows.append(pd.DataFrame({
+            "x": rng.uniform(0, 500, nfix),
+            "y": rng.uniform(0, 500, nfix),
+            "onset": onsets,
+            "duration": durations,
+            "trial": trial,
+        }))
+    df = pd.concat(rows, ignore_index=True)
+    tab = eye_table("x", "y", "duration", "onset", groupvar="trial", data=df)
+
+    # Sample only within the fixation time window so all samples are covered
+    time_samples = np.arange(0, 800, 20)
+    result = fixation_similarity(tab, tab, match_on="trial", method="overlap",
+                                 time_samples=time_samples)
+    assert "eye_sim" in result.columns
+    # Identical data compared to itself must yield perfect overlap
+    assert all(result["eye_sim"] == 1.0)
