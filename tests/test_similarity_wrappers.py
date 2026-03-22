@@ -107,6 +107,48 @@ def test_scanpath_similarity_multimatch_with_permutations():
 
 # ---- Bug 4: kwargs forwarded (screensize, time_samples) ----
 
+# ---- Short scanpath edge case: mm_position_emd in NA return ----
+
+def test_multimatch_short_scanpath_returns_all_six_keys():
+    rng = np.random.default_rng(99)
+    fg_short = fixation_group([0, 100], [0, 100], [100, 100], [1.0, 2.0])
+    fg_normal = fixation_group([0, 50, 100], [0, 50, 100], [100, 100, 100],
+                               [1.0, 2.0, 3.0])
+    from peyesim.multimatch import multi_match
+    result = multi_match(scanpath(fg_short), scanpath(fg_normal),
+                         screensize=(500, 500))
+    expected = ["mm_vector", "mm_direction", "mm_length",
+                "mm_position", "mm_duration", "mm_position_emd"]
+    for k in expected:
+        assert k in result, f"Missing key: {k}"
+    assert len(result) == 6
+
+
+def test_scanpath_similarity_short_scanpath_with_permutations():
+    """Short scanpaths should produce all-NaN columns without crashing."""
+    rows = []
+    for phase in ["enc", "ret"]:
+        for img in ["img1", "img2"]:
+            rows.append(pd.DataFrame({
+                "x": [100.0, 200.0], "y": [100.0, 200.0],
+                "onset": [1.0, 2.0], "duration": [100.0, 100.0],
+                "image": img, "phase": phase,
+            }))
+    df = pd.concat(rows, ignore_index=True)
+    eyetab = eye_table("x", "y", "duration", "onset",
+                       groupvar=["phase", "image"], data=df)
+    enc = add_scanpath(eyetab[eyetab["phase"] == "enc"].reset_index(drop=True))
+    ret = add_scanpath(eyetab[eyetab["phase"] == "ret"].reset_index(drop=True))
+
+    result = scanpath_similarity(enc, ret, match_on="image",
+                                 method="multimatch", screensize=(500, 500),
+                                 permutations=1)
+    mm_cols = [c for c in result.columns if c.startswith("mm_")]
+    assert len(mm_cols) == 18  # 6 metrics x 3 (raw, perm, diff)
+
+
+# ---- Bug 4: kwargs forwarded (screensize, time_samples) ----
+
 def test_similarity_forwards_screensize():
     rng = np.random.default_rng(7)
     fg1 = fixation_group(rng.uniform(0, 500, 10), rng.uniform(0, 500, 10),

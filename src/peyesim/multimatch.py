@@ -128,7 +128,7 @@ def multi_match(x: Scanpath, y: Scanpath, screensize: tuple[float, float]) -> di
         return {
             "mm_vector": np.nan, "mm_direction": np.nan,
             "mm_length": np.nan, "mm_position": np.nan,
-            "mm_duration": np.nan,
+            "mm_duration": np.nan, "mm_position_emd": np.nan,
         }
 
     sacx = x.iloc[:-1].reset_index(drop=True)
