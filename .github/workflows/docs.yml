@@ -31,6 +31,10 @@ jobs:
 
       - uses: quarto-dev/quarto-actions/setup@v2
 
+      - name: Show docs dependency versions
+        run: |
+          python -c "import importlib.metadata as md; print('quartodoc', md.version('quartodoc')); print('griffe', md.version('griffe'))"
+
       - name: Build API reference
         run: cd docs && quartodoc build --config _quartodoc.yml
 
