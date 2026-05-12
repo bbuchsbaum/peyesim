@@ -1,0 +1,182 @@
+/* peyesim docs — modern minimal styling layered on cosmo. */
+
+@import url('https://rsms.me/inter/inter.css');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --pe-fg: #1a1a1a;
+  --pe-fg-muted: #6b7280;
+  --pe-fg-soft: #4b5563;
+  --pe-bg: #fcfcfc;
+  --pe-accent: #2a64f5;
+  --pe-accent-hover: #1a4ccc;
+  --pe-accent-soft: rgba(42, 100, 245, 0.35);
+  --pe-border: #ececec;
+  --pe-border-hover: #c9d4ff;
+  --pe-code-bg: #fafbfc;
+  --pe-inline-code-bg: #f3f4f6;
+}
+
+html {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 17px;
+  line-height: 1.65;
+}
+@supports (font-variation-settings: normal) {
+  html { font-family: 'Inter var', system-ui, sans-serif; }
+}
+
+body {
+  color: var(--pe-fg);
+  background: var(--pe-bg);
+}
+
+code, pre, .sourceCode {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Headings: confident, tight, modern. */
+h1, h2, h3, h4 {
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+h1 { font-weight: 700; font-size: 2.25rem; margin-top: 0.5rem; }
+h2 { font-weight: 650; font-size: 1.55rem; margin-top: 2.5rem; }
+h3 { font-weight: 600; font-size: 1.20rem; margin-top: 2rem; }
+
+/* Page title block. */
+.quarto-title-block { margin-bottom: 2rem; }
+.quarto-title .title {
+  font-size: 2.5rem;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+.quarto-title .subtitle {
+  font-size: 1.15rem;
+  color: var(--pe-fg-muted);
+  font-weight: 400;
+  margin-top: 0.5rem;
+}
+
+/* Links: subtle underline that thickens on hover. */
+a {
+  color: var(--pe-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--pe-accent-soft);
+}
+a:hover {
+  color: var(--pe-accent-hover);
+  text-decoration-thickness: 2px;
+  text-decoration-color: currentColor;
+}
+
+/* Code blocks: faint border, soft background. */
+pre, div.sourceCode {
+  border-radius: 8px !important;
+  border: 1px solid #eee !important;
+  background: var(--pe-code-bg) !important;
+}
+pre code { background: transparent !important; }
+code:not(pre code) {
+  background: var(--pe-inline-code-bg);
+  padding: 0.12em 0.36em;
+  border-radius: 4px;
+  font-size: 0.92em;
+  color: var(--pe-fg);
+}
+
+/* Navbar: thin border instead of shadow — feels more editorial. */
+.navbar {
+  border-bottom: 1px solid var(--pe-border) !important;
+  box-shadow: none !important;
+  backdrop-filter: saturate(180%) blur(6px);
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+.navbar-brand, .navbar-nav .nav-link {
+  color: var(--pe-fg) !important;
+  font-weight: 500;
+}
+.navbar-nav .nav-link:hover { color: var(--pe-accent) !important; }
+
+/* Sidebar: quieter typography. */
+.sidebar-item-text { font-weight: 450; }
+.sidebar-item.active > .sidebar-item-container .sidebar-item-text {
+  font-weight: 600;
+  color: var(--pe-accent);
+}
+
+/* Tables: airy. */
+table { border-collapse: collapse; font-size: 0.95em; }
+table th { border-bottom: 2px solid var(--pe-fg) !important; font-weight: 600; }
+table td { border-bottom: 1px solid #eee !important; padding: 0.5em 0.75em !important; }
+
+/* Callouts: flatter, more editorial. */
+.callout {
+  border-left-width: 3px !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.callout-header { font-weight: 600; }
+
+/* Card grid on landing page. */
+.card {
+  border: 1px solid var(--pe-border) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.card:hover {
+  border-color: var(--pe-border-hover) !important;
+  transform: translateY(-1px);
+}
+.card h3, .card .card-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 0;
+}
+
+/* Hero (used on index.qmd). */
+.hero {
+  padding: 3rem 0 1rem 0;
+  text-align: left;
+}
+.hero h1 {
+  font-size: 3rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+.hero p.lead {
+  font-size: 1.25rem;
+  color: var(--pe-fg-soft);
+  max-width: 36em;
+  margin-bottom: 2rem;
+}
+.hero .btn {
+  border-radius: 6px;
+  padding: 0.6em 1.1em;
+  font-weight: 500;
+  margin-right: 0.5rem;
+  text-decoration: none;
+}
+.hero .btn-primary {
+  background: var(--pe-accent);
+  border-color: var(--pe-accent);
+}
+.hero .btn-primary:hover {
+  background: var(--pe-accent-hover);
+  border-color: var(--pe-accent-hover);
+}
+.hero .btn-outline-secondary {
+  color: var(--pe-fg);
+  border-color: var(--pe-border);
+}
+.hero .btn-outline-secondary:hover {
+  background: #f3f4f6;
+  color: var(--pe-fg);
+  border-color: var(--pe-border-hover);
+}

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from functools import lru_cache
+import shutil
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -98,6 +101,10 @@ def compute_similarity(
         r = np.clip(r, -1 + eps, 1 - eps)
         return float(np.arctanh(r))
     elif method == "cosine":
+        nx = np.linalg.norm(vx)
+        ny = np.linalg.norm(vy)
+        if nx <= eps or ny <= eps:
+            return 1.0 if nx <= eps and ny <= eps else 0.0
         d = _cosine_dist(vx, vy)
         return 1.0 - d
     elif method == "l1":
@@ -148,6 +155,7 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
     """Compute similarity, dispatching on type (mirrors R S3 ``similarity``)."""
     multiscale_aggregation = kwargs.pop("multiscale_aggregation", "mean")
     saliency_map = kwargs.pop("saliency_map", None)
+    window = kwargs.pop("window", None)
 
     # Multiscale
     if isinstance(x, EyeDensityMultiscale):
@@ -191,6 +199,15 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
     # Scanpath (must check before FixationGroup since Scanpath inherits from it)
     if isinstance(x, Scanpath) and isinstance(y, Scanpath):
+        if window is not None:
+            x = _filter_fixation_window(x, window)
+            y = _filter_fixation_window(y, window)
+            if len(x) == 0:
+                warnings.warn("no observations in 'x'")
+                return np.nan
+            if len(y) == 0:
+                warnings.warn("no observations in 'y'")
+                return np.nan
         if method == "multimatch":
             from peyesim.multimatch import multi_match
             screensize = kwargs.pop("screensize", (1024, 768))
@@ -199,6 +216,15 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
     # FixationGroup
     if isinstance(x, FixationGroup) and isinstance(y, FixationGroup):
+        if window is not None:
+            x = _filter_fixation_window(x, window)
+            y = _filter_fixation_window(y, window)
+            if len(x) == 0:
+                warnings.warn("no observations in 'x'")
+                return np.nan
+            if len(y) == 0:
+                warnings.warn("no observations in 'y'")
+                return np.nan
         if method == "overlap":
             from peyesim.overlap import fixation_overlap
             time_samples = kwargs.pop("time_samples", None)
@@ -214,6 +240,14 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
     # Default: numeric vectors
     return compute_similarity(x, y, method=method, saliency_map=saliency_map)
+
+
+def _filter_fixation_window(x: FixationGroup, window) -> FixationGroup:
+    if len(window) != 2 or window[1] <= window[0]:
+        raise ValueError("window must be a length-2 increasing interval.")
+    frame = x.to_pandas(copy=True)
+    frame = frame.loc[(frame["onset"] >= window[0]) & (frame["onset"] < window[1])].reset_index(drop=True)
+    return x.__class__(frame)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +287,7 @@ def sample_density(
             zmat = zmat / s
     elif normalize == "zscore":
         mu = zmat.mean()
-        sd = zmat.std(ddof=0)
+        sd = zmat.ravel().std(ddof=1)
         if sd > 0:
             zmat = (zmat - mu) / sd
 
@@ -481,6 +515,13 @@ def _run_similarity_analysis(
     **kwargs,
 ) -> pd.DataFrame:
     """Core similarity analysis loop (mirrors R ``run_similarity_analysis``)."""
+
+    def mean_or_nan(values) -> float:
+        arr = np.asarray(values, dtype=float)
+        if arr.size == 0 or np.all(np.isnan(arr)):
+            return np.nan
+        return float(np.nanmean(arr))
+
     source_tab = source_tab.copy().reset_index(drop=True)
     matchind = match_keys(source_tab[match_on].values, ref_tab[match_on].values)
     source_tab, matchind = filter_unmatched(
@@ -520,6 +561,7 @@ def _run_similarity_analysis(
             continue
 
         sim = similarity(d1, d2, method=method,
+                         window=window,
                          multiscale_aggregation=multiscale_aggregation, **kwargs)
 
         if permutations > 0:
@@ -529,11 +571,12 @@ def _run_similarity_analysis(
             else:
                 mind = list(set(matchind))
 
-            # Remove current element
-            mind = [m for m in mind if m != mi]
-
             if permutations < len(mind):
                 mind = list(np.random.choice(mind, permutations, replace=False))
+
+            # Match R: sample from the candidate stratum first, then remove the
+            # matched template only if it was sampled.
+            mind = [m for m in mind if m != mi]
 
             if len(mind) == 0:
                 warnings.warn("no matching candidate indices for permutation test. Skipping.")
@@ -549,6 +592,7 @@ def _run_similarity_analysis(
                     psims.append(np.nan if not is_dict_method else None)
                 else:
                     ps = similarity(d1p, d2, method=method,
+                                    window=window,
                                     multiscale_aggregation=multiscale_aggregation, **kwargs)
                     psims.append(ps)
 
@@ -556,12 +600,11 @@ def _run_similarity_analysis(
                 # Average each metric across permutations
                 valid_psims = [p for p in psims if isinstance(p, dict)]
                 if valid_psims:
-                    perm_mean = {k: float(np.nanmean([p[k] for p in valid_psims]))
-                                 for k in valid_psims[0]}
+                    perm_mean = {k: mean_or_nan([p[k] for p in valid_psims]) for k in valid_psims[0]}
                 else:
                     perm_mean = None
             else:
-                perm_mean = float(np.nanmean(psims))
+                perm_mean = mean_or_nan(psims)
 
             eye_sim_list.append(sim)
             perm_sim_list.append(perm_mean)
@@ -692,6 +735,45 @@ def scanpath_similarity(
 # Cross-validated template similarity
 # ---------------------------------------------------------------------------
 
+def _format_split_value(value) -> str:
+    """Format split keys like R's interaction/as.character for common scalars."""
+    if pd.isna(value):
+        return "NA"
+    if isinstance(value, (np.integer, int)):
+        return str(int(value))
+    if isinstance(value, (np.floating, float)) and float(value).is_integer():
+        return str(int(value))
+    return str(value)
+
+
+@lru_cache(maxsize=128)
+def _r_sample_order(n: int, seed: int) -> tuple[int, ...] | None:
+    """Return zero-based ``sample(seq_len(n), n)`` order from R when available."""
+    if n < 1 or shutil.which("Rscript") is None:
+        return None
+    code = (
+        "args <- commandArgs(TRUE); "
+        "n <- as.integer(args[[1]]); seed <- as.integer(args[[2]]); "
+        "set.seed(seed); cat(sample(seq_len(n), n), sep='\\n')"
+    )
+    proc = subprocess.run(
+        ["Rscript", "-e", code, str(int(n)), str(int(seed))],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    try:
+        values = tuple(int(line) - 1 for line in proc.stdout.splitlines() if line.strip())
+    except ValueError:
+        return None
+    if len(values) != n or sorted(values) != list(range(n)):
+        return None
+    return values
+
+
 def _make_cv_folds(
     source_tab: pd.DataFrame,
     split_on: str | list[str],
@@ -704,16 +786,18 @@ def _make_cv_folds(
     -------
     dict
         ``fold_ids`` – integer array (same length as *source_tab*) with fold
-        assignments (0-based), and ``n_folds``.
+        assignments (1-based, matching R), and ``n_folds``.
     """
     if isinstance(split_on, str):
         split_on = [split_on]
 
-    # Build a group key per row
+    # Build a group key per row. R uses interaction(..., lex.order=TRUE,
+    # sep="::"), coerces to character, sorts levels, then samples groups.
     group_keys = source_tab[split_on].apply(
-        lambda row: tuple(row), axis=1
+        lambda row: "::".join(_format_split_value(value) for value in row),
+        axis=1,
     )
-    unique_groups = list(group_keys.unique())
+    unique_groups = sorted(group_keys.unique())
 
     if len(unique_groups) < 2:
         raise ValueError(
@@ -725,17 +809,17 @@ def _make_cv_folds(
         n_folds = min(5, len(unique_groups))
     if n_folds < 2:
         raise ValueError("n_folds must be >= 2.")
-    if n_folds > len(unique_groups):
-        raise ValueError(
-            f"n_folds ({n_folds}) exceeds unique groups ({len(unique_groups)})."
-        )
+    n_folds = min(int(n_folds), len(unique_groups))
 
-    # Shuffle unique groups deterministically and assign round-robin
-    rng = np.random.default_rng(seed)
-    order = rng.permutation(len(unique_groups))
+    # Prefer R's exact sample() order when Rscript is installed; fall back to a
+    # deterministic NumPy shuffle so the Python package remains standalone.
+    order = _r_sample_order(len(unique_groups), int(seed))
+    if order is None:
+        rng = np.random.default_rng(seed)
+        order = tuple(int(i) for i in rng.permutation(len(unique_groups)))
     group_to_fold = {}
     for rank, idx in enumerate(order):
-        group_to_fold[unique_groups[idx]] = rank % n_folds
+        group_to_fold[unique_groups[idx]] = (rank % n_folds) + 1
 
     fold_ids = np.array([group_to_fold[g] for g in group_keys], dtype=int)
     return {"fold_ids": fold_ids, "n_folds": n_folds}
@@ -832,7 +916,7 @@ def template_similarity_cv(
 
     fold_results = []
 
-    for fold in range(n_folds_actual):
+    for fold in range(1, n_folds_actual + 1):
         in_fold = fold_ids == fold
 
         # Eval rows: in this fold AND pass eval_mask

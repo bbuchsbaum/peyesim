@@ -75,14 +75,35 @@ def _entropy_multiscale(
     normalize: bool,
     base: float,
     aggregate: str = "mean",
-) -> float | list[float]:
-    per_scale = [
-        _entropy_eye_density(s, normalize=normalize, base=base)
-        for s in edm.scales
-    ]
+) -> float | dict[str, float]:
+    per_scale = {
+        f"sigma_{scale.sigma:g}": _entropy_eye_density(scale, normalize=normalize, base=base)
+        for scale in edm.scales
+    }
     if aggregate == "none":
         return per_scale
-    return float(np.nanmean(per_scale))
+    return float(np.nanmean(list(per_scale.values())))
+
+
+def _resolve_fixation_entropy_bounds(
+    fg: FixationGroup,
+    xbounds: tuple[float, float] | None = None,
+    ybounds: tuple[float, float] | None = None,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    def pad_range(values) -> tuple[float, float]:
+        arr = np.asarray(values, dtype=float)
+        lo = float(np.nanmin(arr))
+        hi = float(np.nanmax(arr))
+        span = hi - lo
+        if not np.isfinite(span) or span <= np.finfo(float).eps:
+            span = 1.0
+        return (lo - 0.05 * span, hi + 0.05 * span)
+
+    if xbounds is None:
+        xbounds = pad_range(fg["x"])
+    if ybounds is None:
+        ybounds = pad_range(fg["y"])
+    return xbounds, ybounds
 
 
 def _entropy_fixation_group_density(
@@ -90,7 +111,7 @@ def _entropy_fixation_group_density(
     normalize: bool,
     base: float,
     sigma: float | None = None,
-    outdim: tuple[int, int] = (100, 100),
+    outdim: tuple[int, int] = (50, 50),
     **kwargs,
 ) -> float:
     x_vals = fg["x"].to_numpy(dtype=float)
@@ -99,13 +120,11 @@ def _entropy_fixation_group_density(
     if len(x_vals) < 2:
         return np.nan
 
-    # Auto-resolve bounds with 5% padding
-    xmin, xmax = float(x_vals.min()), float(x_vals.max())
-    ymin, ymax = float(y_vals.min()), float(y_vals.max())
-    xpad = (xmax - xmin) * 0.05 if xmax > xmin else 1.0
-    ypad = (ymax - ymin) * 0.05 if ymax > ymin else 1.0
-    xbounds = kwargs.pop("xbounds", (xmin - xpad, xmax + xpad))
-    ybounds = kwargs.pop("ybounds", (ymin - ypad, ymax + ypad))
+    xbounds, ybounds = _resolve_fixation_entropy_bounds(
+        fg,
+        xbounds=kwargs.pop("xbounds", None),
+        ybounds=kwargs.pop("ybounds", None),
+    )
 
     if sigma is None:
         sigma = suggest_sigma(fg, xbounds=xbounds, ybounds=ybounds)
@@ -134,6 +153,15 @@ def _entropy_fixation_group_grid(
     grid_size: tuple[int, int] = (10, 10),
     **kwargs,
 ) -> float:
+    if "grid" in kwargs:
+        grid_size = kwargs.pop("grid")
+
+    if len(grid_size) != 2:
+        raise ValueError("grid_size/grid must be a length-2 sequence.")
+    grid_size = tuple(int(v) for v in grid_size)
+    if grid_size[0] <= 0 or grid_size[1] <= 0:
+        raise ValueError("grid_size/grid values must be positive integers.")
+
     x_vals = fg["x"].to_numpy(dtype=float)
     y_vals = fg["y"].to_numpy(dtype=float)
 
@@ -142,11 +170,12 @@ def _entropy_fixation_group_grid(
 
     xbounds = kwargs.get("xbounds", None)
     ybounds = kwargs.get("ybounds", None)
+    unexpected = set(kwargs).difference({"xbounds", "ybounds"})
+    if unexpected:
+        unknown = ", ".join(sorted(unexpected))
+        raise TypeError(f"Unexpected grid entropy argument(s): {unknown}")
 
-    if xbounds is None:
-        xbounds = (float(x_vals.min()), float(x_vals.max()))
-    if ybounds is None:
-        ybounds = (float(y_vals.min()), float(y_vals.max()))
+    xbounds, ybounds = _resolve_fixation_entropy_bounds(fg, xbounds=xbounds, ybounds=ybounds)
 
     # Bin fixations into a grid
     x_edges = np.linspace(xbounds[0], xbounds[1], grid_size[0] + 1)

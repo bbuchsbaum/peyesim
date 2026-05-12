@@ -1,0 +1,133 @@
+---
+title: "Measuring Similarity Across Repeated Viewings"
+subtitle: "Within- vs. cross-stimulus similarity for repeated viewings."
+jupyter: python3
+execute:
+  freeze: auto
+---
+
+
+When participants view the same image multiple times — say, during encoding
+and retrieval — do they look at the same locations each time? And is that
+consistency specific to the repeated stimulus, or just a general gaze pattern?
+
+`repetitive_similarity()` answers these questions by computing within-stimulus
+similarity across experimental conditions and comparing it to cross-stimulus
+similarity. Unlike `template_similarity()` which requires explicit
+encoding-retrieval pairing, `repetitive_similarity()` examines *all* possible
+within-stimulus combinations and summarizes them.
+
+
+```{python}
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from peyesim import (
+    fixation_group, eye_table, density_by,
+)
+from peyesim.repetitive_similarity import repetitive_similarity
+```
+
+## Setting up the data
+
+Let's simulate a small dataset: 2 participants view 3 images during encoding
+and retrieval.
+
+```{python}
+rng = np.random.default_rng(42)
+
+def gen_fixations(imname, phase, participant, rng):
+    nfix = rng.integers(3, 11)
+    return pd.DataFrame({
+        "x": rng.uniform(0, 100, nfix),
+        "y": rng.uniform(0, 100, nfix),
+        "onset": np.cumsum(rng.uniform(20, 80, nfix)),
+        "duration": rng.uniform(80, 300, nfix),
+        "image": imname,
+        "phase": phase,
+        "participant": participant,
+    })
+
+rows = []
+for s in ["s1", "s2"]:
+    for p in ["encoding", "retrieval"]:
+        for img in ["img1", "img2", "img3"]:
+            rows.append(gen_fixations(img, p, s, rng))
+
+df = pd.concat(rows, ignore_index=True)
+
+eyetab = eye_table(
+    "x", "y", "duration", "onset",
+    groupvar=["participant", "phase", "image"],
+    data=df,
+)
+```
+
+Compute density maps for each participant-phase-image combination:
+
+```{python}
+eyedens = density_by(
+    eyetab,
+    groups=["phase", "image", "participant"],
+    sigma=50,
+    xbounds=(0, 100),
+    ybounds=(0, 100),
+)
+eyedens.drop(columns=["density", "fixgroup"], errors="ignore").head()
+```
+
+## Computing repetitive similarity
+
+`repetitive_similarity()` takes the density table and a condition variable
+(here `phase`) that defines the repeated viewings:
+
+```{python}
+rep_sim = repetitive_similarity(
+    eyedens,
+    condition_var="phase",
+    method="pearson",
+)
+rep_sim.drop(columns=["density", "fixgroup"], errors="ignore")
+```
+
+The result contains two key columns:
+
+- **repsim** — within-stimulus similarity: how consistently participants
+  looked at the same locations for the *same* image across conditions
+- **othersim** — cross-stimulus similarity: baseline similarity between
+  *different* images viewed under different conditions
+
+## Interpreting the results
+
+```{python}
+fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+axes[0].bar(rep_sim["image"], rep_sim["repsim"], color="steelblue", alpha=0.7)
+axes[0].set_xlabel("Stimulus")
+axes[0].set_ylabel("Repetitive Similarity")
+axes[0].set_title("Same image across conditions")
+
+axes[1].bar(rep_sim["image"], rep_sim["othersim"], color="coral", alpha=0.7)
+axes[1].set_xlabel("Stimulus")
+axes[1].set_ylabel("Other Similarity")
+axes[1].set_title("Different images across conditions")
+
+plt.tight_layout()
+plt.show()
+```
+
+With random data, both values should be near zero. In a real experiment, you
+would expect `repsim` to be higher than `othersim` if participants show
+stimulus-specific eye-movement reinstatement. The difference
+(`repsim - othersim`) gives you a corrected measure of reinstatement that
+controls for general gaze tendencies.
+
+## What's next?
+
+- See `repetitive_similarity` docstring for additional options, including `pairwise=True`
+  to return all pairwise similarities instead of summaries
+- [Overview notebook](overview.qmd) covers the full `template_similarity()` workflow
+  with permutation-based baselines
+- [Latent Transforms](latent-transforms.qmd) describes domain-adaptation methods that
+  can improve similarity estimates across devices or participants

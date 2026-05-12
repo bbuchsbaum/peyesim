@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import peyesim
 from peyesim import (
     EyeTable,
     as_eye_table,
@@ -17,6 +18,56 @@ from peyesim import (
     sample_fixations,
     template_sample,
 )
+
+
+R_NAMESPACE_EXPORTS = {
+    "add_scanpath",
+    "affine_transform",
+    "anim_scanpath",
+    "as_eye_table",
+    "calcangle",
+    "cart2pol",
+    "cca_transform",
+    "center",
+    "contract_transform",
+    "coords",
+    "coral_transform",
+    "density_by",
+    "density_matrix",
+    "eye_density",
+    "eye_table",
+    "fixation_entropy",
+    "fixation_group",
+    "fixation_overlap",
+    "fixation_similarity",
+    "gen_density",
+    "get_density",
+    "install_multimatch",
+    "latent_pca_transform",
+    "multi_match",
+    "normalize",
+    "rep_fixations",
+    "repetitive_similarity",
+    "rescale",
+    "sample_density",
+    "sample_density_time",
+    "sample_fixations",
+    "scanpath",
+    "scanpath_similarity",
+    "similarity",
+    "simulate_eye_table",
+    "suggest_sigma",
+    "template_multireg",
+    "template_regression",
+    "template_sample",
+    "template_similarity",
+    "template_similarity_cv",
+}
+
+
+def test_python_public_api_covers_r_namespace_exports():
+    missing = R_NAMESPACE_EXPORTS.difference(peyesim.__all__)
+    assert missing == set()
 
 
 def test_fixation_wrapper_exports_dispatch_to_fixation_group_methods():

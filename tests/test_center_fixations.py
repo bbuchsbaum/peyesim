@@ -1,7 +1,7 @@
 """Port of test_center_fixations.R"""
 
 import numpy as np
-from peyesim import fixation_group
+from peyesim import center, fixation_group
 
 
 def test_can_center_a_fixation_group():
@@ -14,3 +14,7 @@ def test_can_center_a_fixation_group():
     cfix = fg.center()
     assert abs(cfix["x"].mean()) < 1e-10
     assert abs(cfix["y"].mean()) < 1e-10
+
+    generic_cfix = center(fg)
+    assert abs(generic_cfix["x"].mean()) < 1e-10
+    assert abs(generic_cfix["y"].mean()) < 1e-10

@@ -1,0 +1,103 @@
+project:
+  type: website
+  output-dir: _site
+  preview:
+    port: 4200
+    browser: false
+  resources:
+    - "reference/**"
+
+website:
+  title: "peyesim"
+  description: "Analysis of eye-movement data — Python port of the R eyesim package."
+  site-url: "https://bbuchsbaum.github.io/peyesim"
+  repo-url: "https://github.com/bbuchsbaum/peyesim"
+  repo-actions: [edit, issue]
+  repo-branch: main
+  page-navigation: true
+  back-to-top-navigation: true
+  bread-crumbs: false
+  reader-mode: false
+  search:
+    location: navbar
+    type: overlay
+    copy-button: true
+  navbar:
+    pinned: true
+    logo: ""
+    background: light
+    foreground: dark
+    left:
+      - text: "Get started"
+        href: get-started.qmd
+      - text: "Tutorials"
+        href: tutorials/index.qmd
+      - text: "Reference"
+        href: reference/index.qmd
+    right:
+      - icon: github
+        href: "https://github.com/bbuchsbaum/peyesim"
+        aria-label: GitHub
+  sidebar:
+    - id: tutorials
+      title: "Tutorials"
+      style: floating
+      align: left
+      contents:
+        - tutorials/index.qmd
+        - auto: tutorials/*.qmd
+    - id: reference
+      title: "Reference"
+      style: floating
+      contents:
+        - reference/index.qmd
+        - auto: reference/*.qmd
+  page-footer:
+    border: false
+    left: "© 2026 Bradley Buchsbaum"
+    right:
+      - icon: github
+        href: "https://github.com/bbuchsbaum/peyesim"
+
+format:
+  html:
+    theme:
+      light: [cosmo, _variables.scss]
+      dark: [cosmo, _variables.scss, _variables-dark.scss]
+    css: styles.css
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    toc-title: "On this page"
+    number-sections: false
+    anchor-sections: true
+    code-copy: true
+    code-overflow: wrap
+    code-link: true
+    code-annotations: hover
+    highlight-style:
+      light: github
+      dark: github-dark
+    fig-align: center
+    fig-cap-location: bottom
+    fig-format: retina
+    fig-dpi: 200
+    smooth-scroll: true
+    link-external-icon: false
+    link-external-newwindow: true
+    citations-hover: true
+    footnotes-hover: true
+    grid:
+      sidebar-width: 240px
+      body-width: 760px
+      margin-width: 260px
+      gutter-width: 1.5rem
+
+execute:
+  freeze: auto
+  cache: true
+  warning: false
+  message: false
+
+metadata-files:
+  - _quartodoc.yml

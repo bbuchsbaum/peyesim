@@ -1,0 +1,110 @@
+quartodoc:
+  package: peyesim
+  style: pkgdown
+  dir: reference
+  title: "API reference"
+  render_interlinks: true
+  options:
+    include_inherited: true
+  sidebar: reference/_sidebar.yml
+  sections:
+    - title: "Fixations"
+      desc: "Build and manipulate ordered fixation sequences."
+      contents:
+        - FixationGroup
+        - fixation_group
+        - concat_fixation_groups
+        - coords
+        - center
+        - normalize
+        - rescale
+        - rep_fixations
+        - sample_fixations
+
+    - title: "Eye tables"
+      desc: "Trial-level tables that hold many fixation groups."
+      contents:
+        - EyeTable
+        - eye_table
+        - as_eye_table
+        - simulate_eye_table
+
+    - title: "Scanpaths"
+      desc: "Sequenced trajectories between fixations."
+      contents:
+        - Scanpath
+        - scanpath
+        - add_scanpath
+        - cart2pol
+        - calcangle
+
+    - title: "Density maps"
+      desc: "Kernel density estimation over a fixation pattern."
+      contents:
+        - eye_density
+        - gen_density
+        - get_density
+        - density_matrix
+        - density_by
+        - suggest_sigma
+        - EyeDensity
+        - EyeDensityMultiscale
+
+    - title: "Similarity"
+      desc: "Pairwise comparisons between densities, fixations, and scanpaths."
+      contents:
+        - similarity
+        - compute_similarity
+        - template_similarity
+        - template_similarity_cv
+        - fixation_similarity
+        - scanpath_similarity
+        - sample_density
+        - sample_density_time
+        - fixation_overlap
+        - repetitive_similarity
+
+    - title: "Scanpath comparison"
+      desc: "Multi-dimensional scanpath analysis."
+      contents:
+        - multi_match
+        - install_multimatch
+        - crqa
+
+    - title: "Regression and templates"
+      desc: "Regress retrieval gaze onto encoding templates."
+      contents:
+        - template_regression
+        - template_multireg
+        - template_sample
+
+    - title: "Latent transforms"
+      desc: "Domain adaptation between viewing conditions, devices, and participants."
+      contents:
+        - latent_pca_transform
+        - coral_transform
+        - cca_transform
+        - contract_transform
+        - affine_transform
+
+    - title: "Entropy and expansion"
+      desc: "Spatial entropy and scale estimation."
+      contents:
+        - fixation_entropy
+        - entropy_from_mass
+        - estimate_scale
+        - match_scale
+
+    - title: "Visualization"
+      desc: "Plot fixations, densities, and animated scanpaths."
+      contents:
+        - plot_fixation_group
+        - plot_eye_density
+        - anim_scanpath
+
+    - title: "Datasets"
+      desc: "Bundled example data."
+      contents:
+        - available_datasets
+        - data_path
+        - load_dataset

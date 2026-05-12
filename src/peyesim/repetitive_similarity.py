@@ -37,7 +37,8 @@ def repetitive_similarity(
     conditions = tab[condition_var].values
 
     # Pre-compute pairwise similarity matrix (upper triangle)
-    sim_matrix = np.full((n, n), np.nan)
+    sim_matrix = np.empty((n, n), dtype=object)
+    sim_matrix[:, :] = np.nan
     for i, j in combinations(range(n), 2):
         d1, d2 = densities[i], densities[j]
         if d1 is None or d2 is None:

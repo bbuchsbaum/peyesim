@@ -5,7 +5,14 @@ import pandas as pd
 import pytest
 from peyesim import template_similarity
 from peyesim.density import EyeDensity
-from peyesim.latent_transforms import contract_transform, affine_transform
+from peyesim.similarity import compute_similarity
+from peyesim.latent_transforms import (
+    _aggregate_density_moments,
+    _fit_transform,
+    _warp_density,
+    affine_transform,
+    contract_transform,
+)
 
 
 def _make_density(center_x, center_y, spread=1.0, grid_size=20, sigma=50):
@@ -16,6 +23,82 @@ def _make_density(center_x, center_y, spread=1.0, grid_size=20, sigma=50):
     z = np.exp(-((xx - center_x) ** 2 + (yy - center_y) ** 2) / (2 * spread ** 2 * 100))
     z = z / z.sum()
     return EyeDensity(x=x, y=y, z=z, sigma=sigma)
+
+
+def test_geometric_moment_aggregation_is_per_density_not_mass_weighted():
+    d1 = EyeDensity(
+        x=np.array([0.0, 10.0]),
+        y=np.array([0.0, 10.0]),
+        z=np.array([[10.0, 0.0], [0.0, 0.0]]),
+        sigma=1,
+    )
+    d2 = EyeDensity(
+        x=np.array([0.0, 10.0]),
+        y=np.array([0.0, 10.0]),
+        z=np.array([[0.0, 0.0], [0.0, 1.0]]),
+        sigma=1,
+    )
+
+    mean, _ = _aggregate_density_moments([d1, d2])
+
+    np.testing.assert_allclose(mean, [5.0, 5.0])
+
+
+def test_warp_density_renormalizes_like_r_geometric_transform():
+    dens = _make_density(50, 50, grid_size=12)
+    warped = _warp_density(dens, np.eye(2), np.array([15.0, 0.0]))
+
+    np.testing.assert_allclose(warped.z.sum(), 1.0)
+
+
+def test_cosine_similarity_handles_zero_vectors_like_r_fast_path():
+    np.testing.assert_allclose(compute_similarity([0, 0], [1, 2], method="cosine"), 0.0)
+    np.testing.assert_allclose(compute_similarity([0, 0], [0, 0], method="cosine"), 1.0)
+
+
+def test_geometric_fit_by_missing_source_group_is_left_unchanged():
+    ref = pd.DataFrame({
+        "id": ["A"],
+        "pid": ["p1"],
+        "density": [_make_density(40, 40, grid_size=12)],
+    })
+    unchanged = _make_density(80, 80, grid_size=12)
+    src = pd.DataFrame({
+        "id": ["A", "B"],
+        "pid": ["p1", "p2"],
+        "density": [_make_density(45, 45, grid_size=12), unchanged],
+    })
+
+    result = contract_transform(ref, src, match_on="id", fit_by="pid")
+
+    np.testing.assert_allclose(result["source_tab"]["density"].iloc[1].z, unchanged.z)
+    notes = {group["group"]: group["note"] for group in result["info"]["groups"]}
+    assert notes["p2"] == "missing group rows"
+
+
+def test_geometric_cv_model_fit_by_keeps_group_specific_models():
+    ref = pd.DataFrame({
+        "id": ["A", "B"],
+        "pid": ["p1", "p2"],
+        "density": [_make_density(40, 40, grid_size=12), _make_density(70, 70, grid_size=12)],
+    })
+    src = pd.DataFrame({
+        "id": ["A", "B"],
+        "pid": ["p1", "p2"],
+        "density": [_make_density(45, 45, grid_size=12), _make_density(60, 60, grid_size=12)],
+    })
+
+    model = _fit_transform(
+        affine_transform,
+        ref,
+        src,
+        match_on="id",
+        fit_by="pid",
+    )
+
+    assert model["fit_by"] == "pid"
+    assert set(model["group_models"]) == {"p1", "p2"}
+    assert all(group["note"] == "ok" for group in model["groups"])
 
 
 class TestContractTransform:

@@ -61,3 +61,11 @@ def test_repetitive_similarity_with_standard_density():
     for i in range(n_total):
         pw = rep_sim["pairwise_repsim"].iloc[i]
         assert len(pw) == n_per - 1
+
+    first_row_pairwise = rep_sim["pairwise_repsim"].iloc[0]
+    assert isinstance(first_row_pairwise, list)
+    assert isinstance(first_row_pairwise[0], (float, np.floating))
+
+    second_cond_pairwise = rep_sim["pairwise_repsim"].iloc[n_per]
+    assert isinstance(second_cond_pairwise, list)
+    assert isinstance(second_cond_pairwise[0], (float, np.floating))

@@ -33,6 +33,10 @@ def calcangle(x1, x2):
     x2 = np.asarray(x2, dtype=float)
     cos_val = np.dot(x1, x2) / (np.linalg.norm(x1) * np.linalg.norm(x2))
     cos_val = np.clip(cos_val, -1.0, 1.0)
+    if np.isclose(cos_val, 1.0):
+        return 0.0
+    if np.isclose(cos_val, -1.0):
+        return 180.0
     return np.degrees(np.arccos(cos_val))
 
 

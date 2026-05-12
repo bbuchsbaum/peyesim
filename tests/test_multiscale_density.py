@@ -131,3 +131,24 @@ def test_repetitive_similarity_with_multiscale():
     assert len(rep_mean) == n_total
     assert all(isinstance(v, (float, np.floating)) for v in rep_mean["repsim"])
     assert all(isinstance(v, (float, np.floating)) for v in rep_mean["othersim"])
+    assert isinstance(rep_mean["pairwise_repsim"].iloc[0], list)
+    assert len(rep_mean["pairwise_repsim"].iloc[0]) == n_per - 1
+    assert isinstance(rep_mean["pairwise_repsim"].iloc[0][0], (float, np.floating))
+
+    rep_none = repetitive_similarity(dens, density_var="ms_map",
+                                     condition_var="condition",
+                                     method="spearman",
+                                     multiscale_aggregation="none",
+                                     pairwise=True)
+
+    assert "repsim" in rep_none.columns
+    assert "othersim" in rep_none.columns
+    assert "pairwise_repsim" in rep_none.columns
+    assert len(rep_none) == n_total
+    assert all(isinstance(v, (float, np.floating)) for v in rep_none["repsim"])
+    assert all(isinstance(v, (float, np.floating)) for v in rep_none["othersim"])
+    assert isinstance(rep_none["pairwise_repsim"].iloc[0], list)
+    assert len(rep_none["pairwise_repsim"].iloc[0]) == n_per - 1
+    first_scale_vec = rep_none["pairwise_repsim"].iloc[0][0]
+    assert isinstance(first_scale_vec, np.ndarray)
+    assert len(first_scale_vec) == len(sigmas_vec)

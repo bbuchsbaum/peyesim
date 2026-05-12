@@ -1,5 +1,12 @@
 """eyesim-py: Analysis of eye-movement data."""
 
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("peyesim")
+except PackageNotFoundError:  # pragma: no cover - only hit from an uninstalled tree
+    __version__ = "0.0.0+unknown"
+
 from peyesim.fixations import (
     FixationGroup,
     fixation_group,
@@ -45,9 +52,13 @@ from peyesim.latent_transforms import (
 )
 from peyesim.entropy import fixation_entropy, entropy_from_mass
 from peyesim.repetitive_similarity import repetitive_similarity
-from peyesim.visualization import anim_scanpath
+from peyesim.visualization import anim_scanpath, plot_eye_density, plot_fixation_group
+from peyesim.crqa import crqa
+from peyesim.expansion import estimate_scale, match_scale
+from peyesim.data import available_datasets, data_path, load_dataset
 
 __all__ = [
+    "__version__",
     "FixationGroup",
     "fixation_group",
     "concat_fixation_groups",
@@ -67,6 +78,8 @@ __all__ = [
     "calcangle",
     "add_scanpath",
     "anim_scanpath",
+    "plot_eye_density",
+    "plot_fixation_group",
     "eye_density",
     "gen_density",
     "get_density",
@@ -97,4 +110,10 @@ __all__ = [
     "fixation_entropy",
     "entropy_from_mass",
     "repetitive_similarity",
+    "crqa",
+    "estimate_scale",
+    "match_scale",
+    "available_datasets",
+    "data_path",
+    "load_dataset",
 ]

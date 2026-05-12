@@ -28,7 +28,10 @@ class _FrameBacked:
         return self._frame.__getitem__(key)
 
     def __setitem__(self, key, value) -> None:
-        self._frame.__setitem__(key, value)
+        if isinstance(key, str):
+            self._frame.loc[:, key] = value
+        else:
+            self._frame.__setitem__(key, value)
 
     def __array__(self, dtype=None):
         return np.asarray(self._frame, dtype=dtype)
@@ -197,6 +200,7 @@ def fixation_group(
 
     return FixationGroup(
         {
+            "index": np.arange(1, len(x) + 1),
             "index_col": np.arange(1, len(x) + 1),
             "x": x,
             "y": y,
@@ -225,7 +229,8 @@ def concat_fixation_groups(*groups: FixationGroup) -> FixationGroup:
         fg_frame["onset"] = fg_frame["onset"] + offset
         result = pd.concat([result, fg_frame], ignore_index=True)
 
-    result["index_col"] = np.arange(1, len(result) + 1)
+    result["index"] = np.arange(1, len(result) + 1)
+    result["index_col"] = result["index"]
     return FixationGroup(result)
 
 

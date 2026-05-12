@@ -3,9 +3,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from peyesim import (
-    fixation_group, density_by, template_similarity, eye_density,
-)
+from peyesim import density_by, eye_density, fixation_group, template_similarity
 
 
 def test_density_by_produces_perfect_similarity_for_identical_patterns():
@@ -46,6 +44,49 @@ def test_weighted_and_unweighted_density_maps_are_highly_correlated():
 
     corr = np.corrcoef(wd.z.ravel(), ud.z.ravel())[0, 1]
     assert corr > 0.95
+
+
+def test_eye_density_matches_r_ks_oracle_fixture():
+    fg = fixation_group(
+        x=[0, 1, 2],
+        y=[0, 1, 0],
+        onset=[0, 100, 200],
+        duration=[1, 2, 1],
+    )
+
+    dens = eye_density(
+        fg,
+        sigma=1.2,
+        xbounds=(0, 2),
+        ybounds=(0, 2),
+        outdim=(4, 4),
+        normalize=False,
+        duration_weighted=False,
+    )
+    expected = np.array([
+        [0.06442474, 0.06449444, 0.04987646, 0.02987399],
+        [0.07649418, 0.07819428, 0.06185573, 0.03787672],
+        [0.07649418, 0.07819428, 0.06185573, 0.03787672],
+        [0.06442474, 0.06449444, 0.04987646, 0.02987399],
+    ])
+    np.testing.assert_allclose(dens.z, expected, rtol=1e-7, atol=1e-8)
+
+    weighted = eye_density(
+        fg,
+        sigma=1.2,
+        xbounds=(0, 2),
+        ybounds=(0, 2),
+        outdim=(4, 4),
+        normalize=False,
+        duration_weighted=True,
+    )
+    expected_weighted = np.array([
+        [0.06211618, 0.06715732, 0.05619384, 0.03620312],
+        [0.07615713, 0.08422493, 0.07197101, 0.04719403],
+        [0.07615713, 0.08422493, 0.07197101, 0.04719403],
+        [0.06211618, 0.06715732, 0.05619384, 0.03620312],
+    ])
+    np.testing.assert_allclose(weighted.z, expected_weighted, rtol=1e-7, atol=1e-8)
 
 
 def test_density_by_handles_min_fixations_correctly():

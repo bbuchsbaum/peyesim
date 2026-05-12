@@ -38,7 +38,9 @@ def fixation_overlap(
         time_samples = np.arange(0, x["onset"].max() + 1, 20)
 
     method_map = {"euclidean": "euclidean", "manhattan": "cityblock"}
-    dm = method_map.get(dist_method, dist_method)
+    if dist_method not in method_map:
+        raise ValueError("dist_method must be one of {'euclidean', 'manhattan'}")
+    dm = method_map[dist_method]
 
     fx1 = x.sample_fixations(time_samples)
     fx2 = y.sample_fixations(time_samples)

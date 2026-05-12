@@ -44,6 +44,28 @@ def _make_eyetab():
                      groupvar=["phase", "image"], data=df)
 
 
+def _make_similarity_wrapper_fixgroup(x_offset=0, y_offset=0):
+    return fixation_group(
+        x=np.array([100, 180, 260, 340], dtype=float) + x_offset,
+        y=np.array([120, 200, 180, 260], dtype=float) + y_offset,
+        onset=[0, 120, 260, 420],
+        duration=[120, 140, 160, 180],
+    )
+
+
+def _make_similarity_wrapper_tables():
+    fixgroups = [
+        _make_similarity_wrapper_fixgroup(0, 0),
+        _make_similarity_wrapper_fixgroup(80, 40),
+        _make_similarity_wrapper_fixgroup(-60, 90),
+    ]
+    return pd.DataFrame({
+        "trial": ["t1", "t2", "t3"],
+        "fixgroup": fixgroups,
+        "scanpath": [scanpath(fg) for fg in fixgroups],
+    })
+
+
 # ---- Bug 1+2: fixation_similarity with overlap returns scalar ----
 
 def test_fixation_similarity_overlap_returns_scalar():
@@ -145,6 +167,74 @@ def test_scanpath_similarity_short_scanpath_with_permutations():
                                  permutations=1)
     mm_cols = [c for c in result.columns if c.startswith("mm_")]
     assert len(mm_cols) == 18  # 6 metrics x 3 (raw, perm, diff)
+
+
+def test_scanpath_similarity_window_can_make_multimatch_columns_all_nan():
+    ref_tab = _make_similarity_wrapper_tables()
+    source_tab = _make_similarity_wrapper_tables()
+
+    with pytest.warns(UserWarning, match="requires 3 or more coordinates"):
+        result = scanpath_similarity(
+            ref_tab,
+            source_tab,
+            match_on="trial",
+            method="multimatch",
+            permutations=10,
+            window=(0, 250),
+            screensize=(800, 600),
+        )
+
+    expected = [
+        "mm_vector",
+        "mm_direction",
+        "mm_length",
+        "mm_position",
+        "mm_duration",
+        "mm_position_emd",
+    ]
+    for col in expected:
+        assert col in result
+        assert f"{col}_perm" in result
+        assert f"{col}_diff" in result
+    assert result[[*expected, *(f"{col}_perm" for col in expected), *(f"{col}_diff" for col in expected)]].isna().all().all()
+
+
+def test_fixation_similarity_window_filters_before_overlap():
+    fg1 = fixation_group(
+        x=[0, 100, 200],
+        y=[0, 0, 0],
+        onset=[0, 100, 200],
+        duration=[100, 100, 100],
+    )
+    fg2 = fixation_group(
+        x=[0, 500, 200],
+        y=[0, 0, 0],
+        onset=[0, 100, 200],
+        duration=[100, 100, 100],
+    )
+    ref_tab = pd.DataFrame({"trial": ["a"], "fixgroup": [fg1]})
+    source_tab = pd.DataFrame({"trial": ["a"], "fixgroup": [fg2]})
+
+    full = fixation_similarity(
+        ref_tab,
+        source_tab,
+        match_on="trial",
+        method="overlap",
+        time_samples=[0, 100, 200],
+        dthresh=10,
+    )
+    windowed = fixation_similarity(
+        ref_tab,
+        source_tab,
+        match_on="trial",
+        method="overlap",
+        time_samples=[0, 200],
+        window=(0, 50),
+        dthresh=10,
+    )
+
+    assert full["eye_sim"].iloc[0] == pytest.approx(2 / 3)
+    assert windowed["eye_sim"].iloc[0] == pytest.approx(1.0)
 
 
 # ---- Bug 4: kwargs forwarded (screensize, time_samples) ----

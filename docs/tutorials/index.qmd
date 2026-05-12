@@ -1,0 +1,21 @@
+---
+title: "Tutorials"
+subtitle: "Task-oriented walkthroughs for each major workflow."
+listing:
+  - id: tutorials-listing
+    contents:
+      - "*.qmd"
+      - "!index.qmd"
+    type: default
+    sort: "date desc"
+    fields: [title, subtitle, description]
+    sort-ui: false
+    filter-ui: false
+toc: false
+---
+
+Each tutorial uses a single consistent example dataset and progresses from
+the simplest realistic use to the more advanced patterns.
+
+::: {#tutorials-listing}
+:::

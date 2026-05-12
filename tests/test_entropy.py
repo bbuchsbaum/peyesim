@@ -105,10 +105,10 @@ class TestFixationEntropyMultiscale:
     def test_none_aggregation(self):
         edm = self._make_multiscale()
         per_scale = fixation_entropy(edm, normalize=True, aggregate="none")
-        assert isinstance(per_scale, list)
+        assert isinstance(per_scale, dict)
         assert len(per_scale) == 2
-        assert per_scale[0] == pytest.approx(1.0, abs=1e-6)
-        assert per_scale[1] == pytest.approx(0.0, abs=1e-6)
+        assert per_scale["sigma_10"] == pytest.approx(1.0, abs=1e-6)
+        assert per_scale["sigma_30"] == pytest.approx(0.0, abs=1e-6)
 
 
 # ── fixation_entropy on FixationGroup ──────────────────────────────────
@@ -187,6 +187,36 @@ class TestGridEntropyAnalyticProbabilities:
                                     normalize=True, base=2)
         assert abs(ent_norm - 0.5) < 1e-10
 
+    def test_grid_argument_alias_matches_r_call_shape(self):
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.1, 0.2, 0.8, 0.85],
+            "y": [0.1, 0.2, 0.8, 0.85],
+            "onset": [0.0, 100.0, 200.0, 300.0],
+            "duration": [100.0] * 4,
+        }))
+        ent = fixation_entropy(
+            fg,
+            method="grid",
+            grid=(2, 2),
+            xbounds=(0, 1),
+            ybounds=(0, 1),
+            normalize=False,
+            base=2,
+        )
+        assert ent == pytest.approx(1.0)
+
+    def test_grid_argument_validation_matches_r_errors(self):
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.5],
+            "y": [0.5],
+            "onset": [0.0],
+            "duration": [100.0],
+        }))
+        with pytest.raises(ValueError, match="positive integers"):
+            fixation_entropy(fg, method="grid", grid=(0, 5))
+        with pytest.raises(ValueError, match="length-2"):
+            fixation_entropy(fg, method="grid", grid=(5,))
+
 
 class TestGridEntropyOrderInvariance:
     def test_grid_entropy_order_invariance(self):
@@ -245,3 +275,119 @@ class TestFixationGroupDensityEntropyMatchesEyeDensity:
                                   outdim=(30, 30))
         ent_dens = fixation_entropy(dens)
         assert abs(ent_fg - ent_dens) < 1e-12
+
+
+class TestEntropyRemainingRContracts:
+    def test_point_mass_and_uniform_density_values_match_r(self):
+        point = EyeDensity(
+            x=np.array([1.0, 2.0]),
+            y=np.array([1.0, 2.0]),
+            z=np.array([[1.0, 0.0], [0.0, 0.0]]),
+            sigma=1.0,
+        )
+        uniform = EyeDensity(
+            x=np.array([1.0, 2.0]),
+            y=np.array([1.0, 2.0]),
+            z=np.ones((2, 2)),
+            sigma=1.0,
+        )
+
+        assert fixation_entropy(point, normalize=False) == pytest.approx(0.0)
+        assert fixation_entropy(point, normalize=True) == pytest.approx(0.0)
+        assert fixation_entropy(uniform, normalize=True) == pytest.approx(1.0)
+        assert fixation_entropy(uniform, normalize=False, base=2) == pytest.approx(2.0)
+
+    def test_multiscale_none_returns_sigma_named_values(self):
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.2, 0.25, 0.75, 0.8],
+            "y": [0.2, 0.25, 0.75, 0.8],
+            "onset": [0.0, 100.0, 200.0, 300.0],
+            "duration": [100.0] * 4,
+        }))
+        dens_ms = eye_density(
+            fg,
+            sigma=[0.05, 0.15],
+            xbounds=(0, 1),
+            ybounds=(0, 1),
+            outdim=(25, 25),
+        )
+
+        ent_none = fixation_entropy(dens_ms, aggregate="none")
+        ent_mean = fixation_entropy(dens_ms, aggregate="mean")
+
+        assert set(ent_none) == {"sigma_0.05", "sigma_0.15"}
+        assert ent_mean == pytest.approx(np.mean(list(ent_none.values())), abs=1e-12)
+
+    def test_duration_weighted_density_entropy_differs_from_unweighted(self):
+        fg = FixationGroup(pd.DataFrame({
+            "x": [0.2, 0.8],
+            "y": [0.2, 0.8],
+            "onset": [0.0, 500.0],
+            "duration": [50.0, 500.0],
+        }))
+        ent_unweighted = fixation_entropy(
+            fg,
+            method="density",
+            sigma=0.1,
+            xbounds=(0, 1),
+            ybounds=(0, 1),
+            outdim=(30, 30),
+            duration_weighted=False,
+        )
+        ent_weighted = fixation_entropy(
+            fg,
+            method="density",
+            sigma=0.1,
+            xbounds=(0, 1),
+            ybounds=(0, 1),
+            outdim=(30, 30),
+            duration_weighted=True,
+        )
+
+        assert np.isfinite(ent_unweighted)
+        assert np.isfinite(ent_weighted)
+        assert ent_unweighted != pytest.approx(ent_weighted)
+        assert 0 <= ent_weighted <= 1
+
+    def test_density_entropy_sigma_none_uses_suggest_sigma(self):
+        from peyesim.density import suggest_sigma
+
+        fg = FixationGroup(pd.DataFrame({
+            "x": [100.0, 200.0, 600.0, 700.0],
+            "y": [100.0, 200.0, 600.0, 700.0],
+            "onset": [0.0, 200.0, 400.0, 600.0],
+            "duration": [150.0] * 4,
+        }))
+        ent_auto = fixation_entropy(
+            fg,
+            method="density",
+            xbounds=(0, 1024),
+            ybounds=(0, 768),
+            outdim=(30, 30),
+        )
+        sigma = suggest_sigma(fg, xbounds=(0, 1024), ybounds=(0, 768))
+        ent_explicit = fixation_entropy(
+            fg,
+            method="density",
+            sigma=sigma,
+            xbounds=(0, 1024),
+            ybounds=(0, 768),
+            outdim=(30, 30),
+        )
+
+        assert 0 <= ent_auto <= 1
+        assert ent_auto == pytest.approx(ent_explicit, abs=1e-12)
+
+    def test_entropy_bounds_are_padded_when_omitted(self):
+        fg = FixationGroup(pd.DataFrame({
+            "x": [100.0, 200.0, 300.0],
+            "y": [400.0, 500.0, 600.0],
+            "onset": [0.0, 100.0, 200.0],
+            "duration": [100.0] * 3,
+        }))
+
+        ent_density = fixation_entropy(fg, method="density", sigma=20, outdim=(20, 20))
+        ent_grid = fixation_entropy(fg, method="grid", grid=(5, 5))
+
+        assert 0 <= ent_density <= 1
+        assert 0 <= ent_grid <= 1

@@ -42,21 +42,25 @@ similarity(ed1, ed2, method="pearson")
 
 ## Documentation
 
-Full tutorials are available as Jupyter notebooks (with rendered output viewable on GitHub):
+Full tutorials and API reference pages live in the Quarto documentation:
 
-- [Comparing Eye-Movement Patterns](notebooks/01_overview.ipynb) — core workflow: fixations, density maps, template similarity, multiscale analysis
-- [Comparing Scanpaths with MultiMatch](notebooks/02_multimatch.ipynb) — scanpath comparison across six dimensions
-- [Measuring Similarity Across Repeated Viewings](notebooks/03_repetitive_similarity.ipynb) — within- vs. cross-stimulus similarity
-- [Latent Transforms for Template Similarity](notebooks/04_latent_transforms.ipynb) — PCA, CORAL, and CCA domain adaptation
+- [Get started](docs/get-started.qmd) — fixations, density maps, and a first similarity score
+- [Comparing Eye-Movement Patterns](docs/tutorials/overview.qmd) — template similarity and multiscale analysis
+- [Comparing Scanpaths with MultiMatch](docs/tutorials/multimatch.qmd) — scanpath comparison across six dimensions
+- [Measuring Similarity Across Repeated Viewings](docs/tutorials/repetitive-similarity.qmd) — within- vs. cross-stimulus similarity
+- [Latent Transforms for Template Similarity](docs/tutorials/latent-transforms.qmd) — PCA, CORAL, CCA, and geometric alignment
+- [API reference](docs/reference/index.qmd) — public functions and data structures
 
 ## Key features
 
 - **Fixation density maps** — kernel density estimation with configurable bandwidth and multiscale support
 - **Template similarity** — compare encoding vs. retrieval gaze with permutation-based baselines
 - **MultiMatch** — scanpath comparison across vector, direction, length, position, duration, and EMD dimensions
+- **CRQA** — cross-recurrence summaries for multidimensional fixation trajectories
 - **Repetitive similarity** — within- vs. cross-stimulus consistency
 - **Latent transforms** — PCA, CORAL, and CCA for cross-device/cross-participant domain adaptation
 - **Similarity methods** — Pearson, Spearman, Fisher z, cosine, L1, Jaccard, distance covariance, EMD
+- **Visualization** — static fixation/density plots and scanpath animation with optional matplotlib support
 
 ## Lineage
 
@@ -64,4 +68,4 @@ This is a Python port of the R [eyesim](https://github.com/bbuchsbaum/eyesim) pa
 
 ## License
 
-See [LICENSE](eyesim/LICENSE) for details.
+See [LICENSE](LICENSE) for details.

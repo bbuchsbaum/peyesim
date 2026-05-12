@@ -1,0 +1,73 @@
+---
+title: "Get started"
+subtitle: "From a list of fixations to a similarity score in five minutes."
+jupyter: python3
+execute:
+  freeze: auto
+---
+
+## Install
+
+```bash
+pip install peyesim
+```
+
+Optional extras: `pip install "peyesim[viz]"` adds matplotlib for plotting.
+Bundled example datasets load without optional dependencies; the original R
+`.rda` files are also packaged for provenance.
+
+## The 30-second tour
+
+The core workflow has three steps: **fixations → density → similarity**.
+
+```{python}
+#| eval: false
+import numpy as np
+from peyesim import fixation_group, eye_density, similarity
+
+rng = np.random.default_rng(1)
+
+encode = fixation_group(
+    x=rng.uniform(0, 100, 25),
+    y=rng.uniform(0, 100, 25),
+    onset=np.cumsum(rng.uniform(0, 100, 25)),
+    duration=rng.uniform(50, 300, 25),
+)
+retrieve = fixation_group(
+    x=rng.uniform(0, 100, 25),
+    y=rng.uniform(0, 100, 25),
+    onset=np.cumsum(rng.uniform(0, 100, 25)),
+    duration=rng.uniform(50, 300, 25),
+)
+
+ed_encode  = eye_density(encode,   sigma=50, xbounds=(0, 100), ybounds=(0, 100))
+ed_retrieve = eye_density(retrieve, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
+
+similarity(ed_encode, ed_retrieve, method="pearson")
+```
+
+## The mental model
+
+peyesim is organized around three object types and a small set of verbs.
+
+| Object | What it is | How you make one |
+|---|---|---|
+| `FixationGroup` | An ordered list of fixations: x, y, onset, duration | `fixation_group(...)` |
+| `EyeDensity` | A 2-D spatial density built from a `FixationGroup` | `eye_density(...)` |
+| `Scanpath` | A sequenced trajectory between fixations | `scanpath(...)` |
+
+The verbs you'll use most:
+
+- `similarity(a, b, method=...)` — compare two densities
+- `template_similarity(...)` — encoding-vs-retrieval comparison with baselines
+- `multi_match(...)` — six-dimensional scanpath comparison
+- `repetitive_similarity(...)` — within- vs. cross-stimulus consistency
+- `crqa(...)` — cross-recurrence quantification
+
+## Next steps
+
+- [Comparing eye-movement patterns](tutorials/overview.qmd) — full template-similarity workflow
+- [Comparing scanpaths with MultiMatch](tutorials/multimatch.qmd)
+- [Measuring similarity across repeated viewings](tutorials/repetitive-similarity.qmd)
+- [Latent transforms for cross-device alignment](tutorials/latent-transforms.qmd)
+- [API reference](reference/index.qmd) — every public function

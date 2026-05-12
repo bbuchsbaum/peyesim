@@ -52,12 +52,21 @@ def eye_table(
     groupvar: str | list[str],
     data: pd.DataFrame,
     extra_vars: list[str] | None = None,
+    vars: list[str] | None = None,
     clip_bounds: tuple[float, float, float, float] = (0, 1280, 0, 1280),
     relative_coords: bool = True,
 ) -> EyeTable:
-    """Construct an :class:`EyeTable` from a raw data frame."""
+    """Construct an :class:`EyeTable` from a raw data frame.
+
+    ``extra_vars`` keeps additional columns in the grouped output. ``vars`` is
+    accepted as the R-compatible alias.
+    """
     if not isinstance(data, pd.DataFrame):
         raise TypeError("data must be a DataFrame")
+    if extra_vars is not None and vars is not None:
+        raise ValueError("Use either extra_vars or vars, not both.")
+    if vars is not None:
+        extra_vars = vars
 
     if isinstance(groupvar, str):
         groupvar = [groupvar]

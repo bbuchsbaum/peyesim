@@ -37,6 +37,13 @@ def test_fixation_overlap_deterministic_counts():
     assert abs(manhattan["perc"] - 2 / 3) < 1e-10
 
 
+def test_fixation_overlap_rejects_unknown_distance_method():
+    fg = fixation_group(x=[0], y=[0], onset=[0], duration=[1])
+
+    with pytest.raises(ValueError, match="dist_method"):
+        fixation_overlap(fg, fg, dist_method="chebyshev")
+
+
 # ---------- suggest_sigma display clamp ----------
 
 
@@ -74,3 +81,9 @@ def test_concat_fixation_groups():
 
     assert isinstance(combined, FixationGroup)
     assert len(combined) == 4
+    np.testing.assert_array_equal(combined["index"].values, [1, 2, 3, 4])
+    np.testing.assert_array_equal(combined["index_col"].values, [1, 2, 3, 4])
+    np.testing.assert_array_equal(combined["onset"].values, [0, 100, 200, 300])
+
+    with pytest.raises(TypeError, match="must be fixation_group"):
+        concat_fixation_groups(fg1, {"x": [1]})

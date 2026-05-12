@@ -69,6 +69,7 @@ def test_concat_fixation_groups():
     # Onsets of fg2 should be shifted
     assert combined["onset"].iloc[2] >= combined["onset"].iloc[1] + combined["duration"].iloc[1]
     # Indices recomputed
+    np.testing.assert_array_equal(combined["index"].values, [1, 2, 3, 4])
     np.testing.assert_array_equal(combined["index_col"].values, [1, 2, 3, 4])
 
 

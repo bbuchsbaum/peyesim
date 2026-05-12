@@ -1,0 +1,12 @@
+{
+  "hash": "4e8a2a428d71d2e8e7b63913c8b0d7fd",
+  "result": {
+    "engine": "jupyter",
+    "markdown": "---\npagetitle: \"peyesim\"\ntoc: false\nsidebar: false\npage-layout: full\n---\n\n::: {.hero}\n# peyesim\n\n[ Analysis of eye-movement data. Compare fixation patterns, scanpaths, and density maps across conditions — built for memory researchers studying gaze reinstatement. ]{.lead}\n\n[Get started](get-started.qmd){.btn .btn-primary}\n[Browse the API](reference/index.qmd){.btn .btn-outline-secondary}\n:::\n\n## Why peyesim?\n\n::: {.grid}\n\n::: {.g-col-12 .g-col-md-4}\n::: {.card .h-100 .p-3}\n### Fixations to densities\nKernel density estimation with configurable bandwidth and multiscale support, designed for typical eye-tracking spatial scales.\n:::\n:::\n\n::: {.g-col-12 .g-col-md-4}\n::: {.card .h-100 .p-3}\n### Template similarity\nCompare encoding and retrieval gaze with permutation baselines, scanpath comparison, and cross-recurrence summaries.\n:::\n:::\n\n::: {.g-col-12 .g-col-md-4}\n::: {.card .h-100 .p-3}\n### Reproducible by design\nA faithful port of the R `eyesim` package — same APIs, same outputs, tested against an R oracle.\n:::\n:::\n\n:::\n\n## In 30 seconds\n\n::: {#a24dd726 .cell execution_count=1}\n``` {.python .cell-code}\nimport numpy as np\nfrom peyesim import fixation_group, eye_density, similarity\n\nfg1 = fixation_group(\n    x=np.random.uniform(0, 100, 25),\n    y=np.random.uniform(0, 100, 25),\n    onset=np.cumsum(np.random.uniform(0, 100, 25)),\n    duration=np.random.uniform(50, 300, 25),\n)\nfg2 = fixation_group(\n    x=np.random.uniform(0, 100, 25),\n    y=np.random.uniform(0, 100, 25),\n    onset=np.cumsum(np.random.uniform(0, 100, 25)),\n    duration=np.random.uniform(50, 300, 25),\n)\n\ned1 = eye_density(fg1, sigma=50, xbounds=(0, 100), ybounds=(0, 100))\ned2 = eye_density(fg2, sigma=50, xbounds=(0, 100), ybounds=(0, 100))\nsimilarity(ed1, ed2, method=\"pearson\")\n```\n:::\n\n\n[Read the full tutorial →](get-started.qmd)\n\n",
+    "supporting": [
+      "index_files"
+    ],
+    "filters": [],
+    "includes": {}
+  }
+}

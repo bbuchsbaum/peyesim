@@ -9,7 +9,6 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 from scipy.stats import iqr as scipy_iqr
-from scipy.ndimage import gaussian_filter
 
 from peyesim.fixations import FixationGroup
 
@@ -105,24 +104,35 @@ def _kde2d_weighted(
     ybounds: tuple[float, float],
     outdim: tuple[int, int],
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Weighted 2-D KDE using binning + Gaussian filter (fast, matches ks::kde behavior)."""
+    """Weighted 2-D Gaussian KDE on a regular grid.
+
+    This follows the continuous-kernel formula used by the R package's default
+    ``ks::kde`` path: ``sigma`` is the Gaussian bandwidth in coordinate units.
+    """
     gx = np.linspace(xbounds[0], xbounds[1], outdim[0])
     gy = np.linspace(ybounds[0], ybounds[1], outdim[1])
 
-    dx = gx[1] - gx[0] if len(gx) > 1 else 1.0
-    dy = gy[1] - gy[0] if len(gy) > 1 else 1.0
+    hx = float(sigma)
+    hy = float(sigma)
+    if hx <= 0 or hy <= 0:
+        raise ValueError("sigma must be positive")
 
-    # Bin the data
-    z = np.zeros(outdim, dtype=float)
-    xi = np.clip(np.round((x_data - xbounds[0]) / dx).astype(int), 0, outdim[0] - 1)
-    yi = np.clip(np.round((y_data - ybounds[0]) / dy).astype(int), 0, outdim[1] - 1)
+    weights = np.asarray(weights, dtype=float)
+    if len(weights) == 1:
+        weights = np.repeat(weights, len(x_data))
+    if len(weights) != len(x_data):
+        raise ValueError("weights must have length 1 or match the number of fixations")
+    total_weight = weights.sum()
+    if total_weight <= np.finfo(float).eps:
+        warnings.warn("Sum of KDE weights is near zero. Returning an all-zero density grid.")
+        return gx, gy, np.zeros((len(gx), len(gy)), dtype=float)
 
-    np.add.at(z, (xi, yi), weights)
-
-    # Smooth with Gaussian kernel
-    sigma_pixels_x = sigma / dx if dx > 0 else 0
-    sigma_pixels_y = sigma / dy if dy > 0 else 0
-    z = gaussian_filter(z, sigma=[sigma_pixels_x, sigma_pixels_y], mode="constant")
+    norm = 1.0 / np.sqrt(2.0 * np.pi)
+    ax = (gx[:, None] - x_data[None, :]) / hx
+    ay = (gy[:, None] - y_data[None, :]) / hy
+    kx = norm * np.exp(-0.5 * ax ** 2)
+    ky = norm * np.exp(-0.5 * ay ** 2)
+    z = (kx * weights[None, :]) @ ky.T / (total_weight * hx * hy)
 
     return gx, gy, z
 
@@ -168,11 +178,15 @@ def eye_density(
     min_fixations: int = 2,
     origin: tuple[float, float] = (0, 0),
     weights: np.ndarray | None = None,
+    kde_pkg: str | None = None,
 ) -> EyeDensity | EyeDensityMultiscale | None:
     """Compute a density map for a :class:`FixationGroup`.
 
     Parameters mirror the R ``eye_density.fixation_group`` method.
     """
+    if kde_pkg not in (None, "scipy", "ks"):
+        raise ValueError("kde_pkg must be one of None, 'scipy', or 'ks'")
+
     sigma_arr = np.atleast_1d(np.asarray(sigma, dtype=float))
     if np.any(sigma_arr <= 0):
         raise ValueError("sigma must be a positive numeric value or vector")

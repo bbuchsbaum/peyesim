@@ -68,7 +68,7 @@ class TestTemplateSimilarityCV:
         )
         folds = result[".cv_fold"].unique()
         assert len(folds) == 3
-        assert set(folds) == {0, 1, 2}
+        assert set(folds) == {1, 2, 3}
 
     def test_n_folds_2(self):
         ref_tab, source_tab = _make_test_data(n_images=4)
@@ -244,6 +244,74 @@ def _make_cv_density_tables():
     return ref_tab, source_tab
 
 
+def _make_cv_warp_density(mean=(0.0, 0.0), cov=None, x=None, y=None):
+    if cov is None:
+        cov = np.diag([0.2, 0.2])
+    if x is None:
+        x = np.linspace(-2, 2, 25)
+    if y is None:
+        y = np.linspace(-2, 2, 25)
+    xx, yy = np.meshgrid(x, y, indexing="ij")
+    coords = np.column_stack([xx.ravel(), yy.ravel()])
+    centered = coords - np.asarray(mean, dtype=float)
+    inv_cov = np.linalg.inv(np.asarray(cov, dtype=float))
+    expo = np.sum((centered @ inv_cov) * centered, axis=1)
+    z = np.exp(-0.5 * expo).reshape(len(x), len(y))
+    z = z / z.sum()
+    from peyesim.density import EyeDensity
+
+    return EyeDensity(x=np.asarray(x, dtype=float), y=np.asarray(y, dtype=float), z=z, sigma=1.0)
+
+
+def _make_contract_cv_tables(n=16, seed=1):
+    rng = np.random.default_rng(seed)
+    ref_cov = np.array([[0.16, 0.03], [0.03, 0.12]])
+    scale_true = 0.74
+    shift_true = np.array([0.16, -0.11])
+    ref_means = [rng.uniform(-0.8, 0.8, 2) for _ in range(n)]
+    ref_tab = pd.DataFrame({
+        "id": np.arange(1, n + 1),
+        "density": [_make_cv_warp_density(mean=mu, cov=ref_cov) for mu in ref_means],
+    })
+    source_tab = pd.DataFrame({
+        "row_id": np.arange(1, n + 1),
+        "id": np.arange(1, n + 1),
+        "density": [
+            _make_cv_warp_density(
+                mean=(mu_ref - shift_true) / scale_true,
+                cov=ref_cov / (scale_true ** 2),
+            )
+            for mu_ref in ref_means
+        ],
+    })
+    return ref_tab, source_tab
+
+
+def _make_affine_cv_tables(n=16, seed=2):
+    rng = np.random.default_rng(seed)
+    ref_cov = np.array([[0.16, 0.05], [0.05, 0.11]])
+    a_true = np.array([[0.82, 0.18], [-0.12, 1.08]])
+    t_true = np.array([0.14, -0.09])
+    a_inv = np.linalg.inv(a_true)
+    ref_means = [rng.uniform(-0.8, 0.8, 2) for _ in range(n)]
+    ref_tab = pd.DataFrame({
+        "id": np.arange(1, n + 1),
+        "density": [_make_cv_warp_density(mean=mu, cov=ref_cov) for mu in ref_means],
+    })
+    source_tab = pd.DataFrame({
+        "row_id": np.arange(1, n + 1),
+        "id": np.arange(1, n + 1),
+        "density": [
+            _make_cv_warp_density(
+                mean=a_inv @ (mu_ref - t_true),
+                cov=a_inv @ ref_cov @ a_inv.T,
+            )
+            for mu_ref in ref_means
+        ],
+    })
+    return ref_tab, source_tab
+
+
 class TestCVPortedFromR:
     """Tests ported from the R test_similarity_cv.R test suite."""
 
@@ -265,7 +333,7 @@ class TestCVPortedFromR:
         assert result["eye_sim"].notna().all()
         assert np.isfinite(result["eye_sim"]).all()
         # Should have 2 folds
-        assert set(result[".cv_fold"].unique()) == {0, 1}
+        assert set(result[".cv_fold"].unique()) == {1, 2}
 
     def test_cv_no_transform_matches_direct_exact(self):
         """Without a transform, CV eye_sim values should EXACTLY match template_similarity."""
@@ -372,7 +440,7 @@ class TestCVPortedFromR:
         assert np.isfinite(result["eye_sim"]).all()
 
     def test_cv_manual_fold_matches(self):
-        """Manually replicate fold 0 logic and compare with CV result."""
+        """Manually replicate fold 1 logic and compare with CV result."""
         from peyesim import coral_transform
         from peyesim.latent_transforms import _fit_transform, _apply_transform
         from peyesim.similarity import _run_similarity_analysis, _make_cv_folds
@@ -388,11 +456,11 @@ class TestCVPortedFromR:
             split_on="id", n_folds=2, seed=1,
         )
 
-        # Manually replicate fold 0
+        # Manually replicate fold 1
         cv = _make_cv_folds(source_tab, "id", n_folds=2, seed=1)
         fold_ids = cv["fold_ids"]
 
-        fold = 0
+        fold = 1
         in_fold = fold_ids == fold
         eval_source = source_tab.loc[in_fold].reset_index(drop=True)
         train_source = source_tab.loc[~in_fold].reset_index(drop=True)
@@ -426,8 +494,8 @@ class TestCVPortedFromR:
             sourcevar=transformed["sourcevar"],
         )
 
-        # Compare with CV fold 0 results
-        cv_fold0 = cv_result[cv_result[".cv_fold"] == 0].sort_values(
+        # Compare with CV fold 1 results
+        cv_fold1 = cv_result[cv_result[".cv_fold"] == 1].sort_values(
             ["id", "phase"]
         ).reset_index(drop=True)
         manual_sorted = manual_res.sort_values(
@@ -435,7 +503,197 @@ class TestCVPortedFromR:
         ).reset_index(drop=True)
 
         np.testing.assert_allclose(
-            cv_fold0["eye_sim"].values,
+            cv_fold1["eye_sim"].values,
             manual_sorted["eye_sim"].values,
             atol=1e-10,
         )
+
+    def test_cv_manual_grouped_coral_fold_matches(self):
+        """Manual held-out grouped CORAL computation matches CV for one fold."""
+        from peyesim import coral_transform
+        from peyesim.latent_transforms import _fit_transform, _apply_transform
+        from peyesim.similarity import _run_similarity_analysis, _make_cv_folds
+
+        ref_tab, source_tab = _make_cv_density_tables()
+        cv = _make_cv_folds(source_tab, "id", n_folds=2, seed=1)
+        fold_ids = cv["fold_ids"]
+        fold = 1
+        eval_mask = (fold_ids == fold) & (source_tab["phase"] == "delay")
+        eval_source = source_tab.loc[eval_mask].reset_index(drop=True)
+        eval_keys = set(eval_source["id"].unique())
+
+        train_mask = (fold_ids != fold) & (source_tab["phase"] == "scene")
+        train_source = source_tab.loc[train_mask & ~source_tab["id"].isin(eval_keys)].reset_index(drop=True)
+        train_keys = set(train_source["id"].unique())
+        ref_train = ref_tab[ref_tab["id"].isin(train_keys)].reset_index(drop=True)
+        ref_eval = ref_tab[ref_tab["id"].isin(eval_keys)].reset_index(drop=True)
+
+        model = _fit_transform(
+            coral_transform,
+            ref_train,
+            train_source,
+            "id",
+            refvar="density",
+            sourcevar="density",
+            comps=2,
+            shrink=1e-6,
+            fit_by="participant",
+        )
+        transformed = _apply_transform(model, ref_eval, eval_source)
+        manual_res = _run_similarity_analysis(
+            transformed["ref_tab"],
+            transformed["source_tab"],
+            "id",
+            permutations=0,
+            permute_on=None,
+            method="cosine",
+            refvar=transformed["refvar"],
+            sourcevar=transformed["sourcevar"],
+        )
+
+        cv_result = template_similarity_cv(
+            ref_tab,
+            source_tab,
+            match_on="id",
+            method="cosine",
+            similarity_transform=coral_transform,
+            similarity_transform_args={"comps": 2, "shrink": 1e-6, "fit_by": "participant"},
+            split_on="id",
+            n_folds=2,
+            permutations=0,
+            fit_source_filter=lambda tab: tab["phase"] == "scene",
+            eval_source_filter=lambda tab: tab["phase"] == "delay",
+            seed=1,
+        )
+        cv_fold = cv_result[cv_result[".cv_fold"] == fold].sort_values("id").reset_index(drop=True)
+        manual_sorted = manual_res.sort_values("id").reset_index(drop=True)
+
+        np.testing.assert_array_equal(cv_fold["id"].values, manual_sorted["id"].values)
+        np.testing.assert_allclose(cv_fold["eye_sim"].values, manual_sorted["eye_sim"].values, atol=1e-10)
+
+    def test_cv_manual_contract_fold_matches(self):
+        """Manual held-out contract transform computation matches CV for one fold."""
+        from peyesim import contract_transform
+        from peyesim.latent_transforms import _fit_transform, _apply_transform
+        from peyesim.similarity import _run_similarity_analysis, _make_cv_folds
+
+        ref_means = [
+            np.array([-0.5, -0.2]),
+            np.array([0.4, -0.1]),
+            np.array([-0.2, 0.4]),
+            np.array([0.6, 0.3]),
+        ]
+        ref_cov = np.array([[0.16, 0.03], [0.03, 0.12]])
+        scale_true = 0.74
+        shift_true = np.array([0.16, -0.11])
+        ref_tab = pd.DataFrame({
+            "id": np.arange(1, 5),
+            "participant": ["p1", "p1", "p2", "p2"],
+            "phase": "scene",
+            "density": [_make_cv_warp_density(mean=mu, cov=ref_cov) for mu in ref_means],
+        })
+        source_tab = pd.DataFrame({
+            "row_id": np.arange(1, 9),
+            "id": np.repeat(np.arange(1, 5), 2),
+            "participant": np.repeat(["p1", "p1", "p2", "p2"], 2),
+            "phase": ["scene", "delay"] * 4,
+            "density": [
+                _make_cv_warp_density(
+                    mean=(mu_ref - shift_true) / scale_true,
+                    cov=ref_cov / (scale_true ** 2),
+                )
+                for mu_ref in np.repeat(ref_means, 2, axis=0)
+            ],
+        })
+        cv = _make_cv_folds(source_tab, "id", n_folds=2, seed=1)
+        fold_ids = cv["fold_ids"]
+        fold = 1
+        eval_mask = (fold_ids == fold) & (source_tab["phase"] == "delay")
+        eval_source = source_tab.loc[eval_mask].reset_index(drop=True)
+        eval_keys = set(eval_source["id"].unique())
+        train_mask = (fold_ids != fold) & (source_tab["phase"] == "scene")
+        train_source = source_tab.loc[train_mask & ~source_tab["id"].isin(eval_keys)].reset_index(drop=True)
+        train_keys = set(train_source["id"].unique())
+        ref_train = ref_tab[ref_tab["id"].isin(train_keys)].reset_index(drop=True)
+        ref_eval = ref_tab[ref_tab["id"].isin(eval_keys)].reset_index(drop=True)
+
+        model = _fit_transform(
+            contract_transform,
+            ref_train,
+            train_source,
+            "id",
+            refvar="density",
+            sourcevar="density",
+            shrink=1e-6,
+        )
+        transformed = _apply_transform(model, ref_eval, eval_source)
+        manual_res = _run_similarity_analysis(
+            transformed["ref_tab"],
+            transformed["source_tab"],
+            "id",
+            permutations=0,
+            permute_on=None,
+            method="cosine",
+            refvar=transformed["refvar"],
+            sourcevar=transformed["sourcevar"],
+        )
+
+        cv_result = template_similarity_cv(
+            ref_tab,
+            source_tab,
+            match_on="id",
+            method="cosine",
+            similarity_transform=contract_transform,
+            similarity_transform_args={"shrink": 1e-6},
+            split_on="id",
+            n_folds=2,
+            permutations=0,
+            fit_source_filter=lambda tab: tab["phase"] == "scene",
+            eval_source_filter=lambda tab: tab["phase"] == "delay",
+            seed=1,
+        )
+        cv_fold = cv_result[cv_result[".cv_fold"] == fold].sort_values("row_id").reset_index(drop=True)
+        manual_sorted = manual_res.sort_values("row_id").reset_index(drop=True)
+
+        np.testing.assert_array_equal(cv_fold["row_id"].values, manual_sorted["row_id"].values)
+        np.testing.assert_allclose(cv_fold["eye_sim"].values, manual_sorted["eye_sim"].values, atol=1e-10)
+
+    def test_cv_improves_held_out_similarity_under_contract_distortion(self):
+        from peyesim import contract_transform, template_similarity
+
+        ref_tab, source_tab = _make_contract_cv_tables(n=16, seed=11)
+        raw = template_similarity(ref_tab, source_tab, match_on="id", permutations=0, method="cosine")
+        cv = template_similarity_cv(
+            ref_tab,
+            source_tab,
+            match_on="id",
+            split_on="id",
+            n_folds=4,
+            permutations=0,
+            method="cosine",
+            similarity_transform=contract_transform,
+            similarity_transform_args={"shrink": 1e-6},
+            seed=1,
+        )
+
+        assert cv["eye_sim"].mean() > raw["eye_sim"].mean()
+
+    def test_cv_improves_held_out_similarity_under_affine_distortion(self):
+        from peyesim import affine_transform, template_similarity
+
+        ref_tab, source_tab = _make_affine_cv_tables(n=16, seed=12)
+        raw = template_similarity(ref_tab, source_tab, match_on="id", permutations=0, method="cosine")
+        cv = template_similarity_cv(
+            ref_tab,
+            source_tab,
+            match_on="id",
+            split_on="id",
+            n_folds=4,
+            permutations=0,
+            method="cosine",
+            similarity_transform=affine_transform,
+            similarity_transform_args={"shrink": 1e-6},
+            seed=1,
+        )
+
+        assert cv["eye_sim"].mean() > raw["eye_sim"].mean()

@@ -110,9 +110,13 @@ def test_sample_density_time_passes_normalize_through():
         "trial_id": ["A"],
         "fixgroup": [_make_test_fixgroup([5, 0], [5, 0], [0, 200])],
     })
+    res_none = sample_density_time(template_tab, source_tab, match_on="trial_id",
+                                   times=[0, 200], normalize="none")
     res_max = sample_density_time(template_tab, source_tab, match_on="trial_id",
                                   times=[0, 200], normalize="max")
     assert res_max["sampled"].iloc[0]["z"].iloc[0] == pytest.approx(1.0)
+    assert len(res_none["sampled"].iloc[0]) == len(res_max["sampled"].iloc[0])
+    assert np.isfinite(res_max["sampled"].iloc[0]["z"].iloc[1])
 
 
 def test_sample_density_time_zscore_makes_comparable():
@@ -139,6 +143,41 @@ def test_sample_density_time_zscore_makes_comparable():
     assert z_A > 0
     assert z_B > 0
     assert z_A == pytest.approx(z_B, abs=0.01)
+
+
+def test_sample_density_time_normalize_with_time_bins_and_permutations():
+    template_tab = pd.DataFrame({
+        "trial_id": ["A", "B"],
+        "subject": ["S1", "S1"],
+        "density": [
+            _make_test_density(2, 2, sigma=1),
+            _make_test_density(8, 8, sigma=1),
+        ],
+    })
+    source_tab = pd.DataFrame({
+        "trial_id": ["A", "B"],
+        "subject": ["S1", "S1"],
+        "fixgroup": [
+            _make_test_fixgroup([2], [2], [0]),
+            _make_test_fixgroup([8], [8], [0]),
+        ],
+    })
+
+    result = sample_density_time(
+        template_tab,
+        source_tab,
+        match_on="trial_id",
+        times=[0],
+        time_bins=[0, 100],
+        permutations=5,
+        permute_on="subject",
+        normalize="zscore",
+    )
+
+    assert "bin_1" in result.columns
+    assert "perm_bin_1" in result.columns
+    assert (result["bin_1"] > 0).all()
+    assert (result["perm_bin_1"] < 0).all()
 
 
 def test_normalize_argument_validates():

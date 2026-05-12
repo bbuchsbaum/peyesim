@@ -9,3 +9,8 @@ build/
 .omc/
 .pytest_cache/
 .ipynb_checkpoints/
+docs/_site/
+docs/.quarto/
+docs/.jupyter_cache/
+docs/tutorials/.jupyter_cache/
+.jupyter_cache/

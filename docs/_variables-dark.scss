@@ -1,0 +1,77 @@
+/*-- scss:defaults --*/
+$body-bg:    #0e1116;
+$body-color: #e6e8eb;
+$link-color: #6aa3ff;
+$link-hover-color: #93bbff;
+$border-color: #20242b;
+$code-bg:    #161a21;
+$code-color: #e6e8eb;
+$navbar-bg:  #0e1116;
+$navbar-fg:  #e6e8eb;
+
+$primary-text-emphasis-dark: #93bbff;
+$secondary-text-emphasis-dark: #c4cad3;
+$success-text-emphasis-dark: #8bd9a6;
+$info-text-emphasis-dark: #8ac8ff;
+$warning-text-emphasis-dark: #ffd27a;
+$danger-text-emphasis-dark: #ff9b9b;
+$light-text-emphasis-dark: #f2f4f7;
+$dark-text-emphasis-dark: #c4cad3;
+
+$primary-bg-subtle-dark: #102044;
+$secondary-bg-subtle-dark: #1a1f27;
+$success-bg-subtle-dark: #10281b;
+$info-bg-subtle-dark: #102438;
+$warning-bg-subtle-dark: #34260d;
+$danger-bg-subtle-dark: #351517;
+$light-bg-subtle-dark: #20242b;
+$dark-bg-subtle-dark: #11151b;
+
+$primary-border-subtle-dark: #244b91;
+$secondary-border-subtle-dark: #343b46;
+$success-border-subtle-dark: #2a7040;
+$info-border-subtle-dark: #2f638c;
+$warning-border-subtle-dark: #8a671f;
+$danger-border-subtle-dark: #7a3034;
+$light-border-subtle-dark: #343b46;
+$dark-border-subtle-dark: #20242b;
+
+$body-color-dark: #e6e8eb;
+$body-bg-dark: #0e1116;
+$body-secondary-color-dark: rgba(230, 232, 235, 0.75);
+$body-secondary-bg-dark: #161a21;
+$body-tertiary-color-dark: rgba(230, 232, 235, 0.5);
+$body-tertiary-bg-dark: #11151b;
+$body-emphasis-color-dark: #ffffff;
+$border-color-dark: #20242b;
+$border-color-translucent-dark: rgba(255, 255, 255, 0.15);
+$headings-color-dark: inherit;
+$link-color-dark: #6aa3ff;
+$link-hover-color-dark: #93bbff;
+$code-color-dark: #e6e8eb;
+
+$form-select-indicator-color-dark: #e6e8eb;
+$form-select-indicator-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='#e6e8eb' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/></svg>");
+$form-switch-color-dark: rgba(255, 255, 255, 0.25);
+$form-switch-bg-image-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'><circle r='3' fill='rgba(255, 255, 255, 0.25)'/></svg>");
+$form-valid-color-dark: #8bd9a6;
+$form-valid-border-color-dark: #8bd9a6;
+$form-invalid-color-dark: #ff9b9b;
+$form-invalid-border-color-dark: #ff9b9b;
+$accordion-icon-color-dark: #93bbff;
+$accordion-icon-active-color-dark: #93bbff;
+$accordion-button-icon-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='#93bbff'><path fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/></svg>");
+$accordion-button-active-icon-dark: $accordion-button-icon-dark;
+
+/*-- scss:rules --*/
+pre, .sourceCode {
+  border: 1px solid #20242b !important;
+  background: #11151b !important;
+}
+code:not(pre code) { background: #1a1f27; }
+.navbar {
+  background: rgba(14,17,22,0.85) !important;
+  border-bottom: 1px solid #20242b;
+}
+table th { border-bottom: 2px solid #e6e8eb; }
+table td { border-bottom: 1px solid #20242b; }
