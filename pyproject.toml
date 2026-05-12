@@ -38,6 +38,7 @@ docs = [
     "quartodoc>=0.11,<0.12",
     "griffe>=1.14,<1.15",
     "jupyter",
+    "jupyter-cache",
     "ipykernel",
     "nbformat",
     "nbclient",
