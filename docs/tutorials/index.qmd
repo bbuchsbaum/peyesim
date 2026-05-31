@@ -1,21 +1,66 @@
 ---
 title: "Tutorials"
 subtitle: "Task-oriented walkthroughs for each major workflow."
-listing:
-  - id: tutorials-listing
-    contents:
-      - "*.qmd"
-      - "!index.qmd"
-    type: default
-    sort: "date desc"
-    fields: [title, subtitle, description]
-    sort-ui: false
-    filter-ui: false
 toc: false
 ---
 
 Each tutorial uses a single consistent example dataset and progresses from
 the simplest realistic use to the more advanced patterns.
 
-::: {#tutorials-listing}
+::: {.tutorial-list}
+
+::: {.tutorial-card}
+::: {.tutorial-icon}
+<i class="bi bi-grid-3x3-gap" aria-hidden="true"></i>
+:::
+::: {.tutorial-copy}
+### [Comparing Eye-Movement Patterns](overview.qmd)
+Core workflow: fixations, density maps, template similarity, and multiscale analysis.
+
+Start here if you want the main analysis path from raw fixation records to
+condition-level similarity scores.
+:::
+:::
+
+::: {.tutorial-card}
+::: {.tutorial-icon}
+<i class="bi bi-signpost-split" aria-hidden="true"></i>
+:::
+::: {.tutorial-copy}
+### [Comparing Scanpaths with MultiMatch](multimatch.qmd)
+Compare scanpath structure across vector, direction, length, position,
+duration, and EMD dimensions.
+
+Use this when order, shape, or timing matters beyond a single spatial
+similarity score.
+:::
+:::
+
+::: {.tutorial-card}
+::: {.tutorial-icon}
+<i class="bi bi-repeat" aria-hidden="true"></i>
+:::
+::: {.tutorial-copy}
+### [Measuring Similarity Across Repeated Viewings](repetitive-similarity.qmd)
+Estimate within- versus cross-stimulus similarity across repeated encounters.
+
+Use this for repeated-viewing designs where each image appears under multiple
+conditions or phases.
+:::
+:::
+
+::: {.tutorial-card}
+::: {.tutorial-icon}
+<i class="bi bi-diagram-3" aria-hidden="true"></i>
+:::
+::: {.tutorial-copy}
+### [Latent Transforms for Template Similarity](latent-transforms.qmd)
+PCA, CORAL, and CCA domain adaptation for cross-device or cross-participant
+comparison.
+
+Use this when encoding and retrieval density maps may differ by calibration,
+screen geometry, or participant-specific transforms.
+:::
+:::
+
 :::

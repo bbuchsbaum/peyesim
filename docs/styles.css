@@ -277,6 +277,54 @@ a:hover {
   border-radius: 6px;
 }
 
+.tutorial-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+.tutorial-card {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 8px;
+  background: var(--bs-secondary-bg, rgba(255, 255, 255, 0.02));
+  padding: 1.25rem;
+}
+.tutorial-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid color-mix(in srgb, var(--bs-link-color) 34%, transparent);
+  border-radius: 8px;
+  color: var(--bs-link-color);
+  background: color-mix(in srgb, var(--bs-link-color) 10%, transparent);
+}
+.tutorial-icon i {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.tutorial-copy h3 {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+  font-size: 1.15rem;
+}
+.tutorial-copy h3 a {
+  text-decoration: none;
+}
+.tutorial-copy h3 a:hover {
+  text-decoration: underline;
+}
+.tutorial-copy p {
+  margin-bottom: 0.65rem;
+  color: var(--bs-secondary-color, #aab6c6);
+}
+.tutorial-copy p:last-child {
+  margin-bottom: 0;
+}
+
 @media (max-width: 520px) {
   .hero {
     padding-top: 2rem;
@@ -291,5 +339,14 @@ a:hover {
   .kicker {
     display: block;
     margin-top: 0.8rem;
+  }
+  .tutorial-card {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0.8rem;
+    padding: 1rem;
+  }
+  .tutorial-icon {
+    width: 2.5rem;
+    height: 2.5rem;
   }
 }
