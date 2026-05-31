@@ -14,3 +14,4 @@ docs/.quarto/
 docs/.jupyter_cache/
 docs/tutorials/.jupyter_cache/
 .jupyter_cache/
+.quarto-kernels/

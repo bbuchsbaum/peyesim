@@ -1,10 +1,17 @@
 project:
   type: website
   output-dir: _site
+  render:
+    - "*.qmd"
+    - "tutorials/*.qmd"
+    - "reference/*.qmd"
+    - "!_archive/**"
+    - "!_plan/**"
   preview:
     port: 4200
     browser: false
   resources:
+    - "assets/**"
     - "reference/**"
 
 website:
@@ -12,6 +19,7 @@ website:
   description: "Analysis of eye-movement data — Python port of the R eyesim package."
   site-url: "https://bbuchsbaum.github.io/peyesim"
   repo-url: "https://github.com/bbuchsbaum/peyesim"
+  favicon: assets/favicon.svg
   repo-actions: [edit, issue]
   repo-branch: main
   page-navigation: true
@@ -25,8 +33,8 @@ website:
   navbar:
     pinned: true
     logo: ""
-    background: light
-    foreground: dark
+    # No background:/foreground: — let the SCSS drive navbar color so it
+    # cannot desync from the body theme.
     left:
       - text: "Get started"
         href: get-started.qmd
@@ -61,9 +69,10 @@ website:
 
 format:
   html:
-    theme:
-      light: [cosmo, _variables.scss]
-      dark: [cosmo, _variables.scss, _variables-dark.scss]
+    # Single dark-first theme. A light/dark theme pair leaves both
+    # highlight stylesheets enabled and the code palette desyncs from
+    # the background — do not reintroduce it.
+    theme: [darkly, _variables.scss, _variables-dark.scss]
     css: styles.css
     toc: true
     toc-depth: 3
@@ -75,9 +84,7 @@ format:
     code-overflow: wrap
     code-link: true
     code-annotations: hover
-    highlight-style:
-      light: github
-      dark: github-dark
+    highlight-style: github-dark
     fig-align: center
     fig-cap-location: bottom
     fig-format: retina
@@ -88,9 +95,9 @@ format:
     citations-hover: true
     footnotes-hover: true
     grid:
-      sidebar-width: 240px
-      body-width: 760px
-      margin-width: 260px
+      sidebar-width: 260px
+      body-width: 860px
+      margin-width: 220px
       gutter-width: 1.5rem
 
 execute:

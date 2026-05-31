@@ -6,64 +6,97 @@ page-layout: full
 ---
 
 ::: {.hero}
-# peyesim
+::: {.hero-copy}
+[Eye-movement analysis]{.eyebrow}
 
-[ Analysis of eye-movement data. Compare fixation patterns, scanpaths, and density maps across conditions — built for memory researchers studying gaze reinstatement. ]{.lead}
+# Measure whether gaze returns to where it was.
 
-[Get started](get-started.qmd){.btn .btn-primary}
-[Browse the API](reference/index.qmd){.btn .btn-outline-secondary}
+[Compare fixation patterns, scanpaths, and density maps across conditions — built for memory researchers studying gaze reinstatement between encoding and retrieval.]{.lead}
+
+[Get started →](get-started.qmd){.btn .btn-primary}
+[API reference](reference/index.qmd){.btn .btn-outline-secondary}
+
+[density maps]{.kicker} [template similarity]{.kicker} [MultiMatch scanpaths]{.kicker}
 :::
-
-## Why peyesim?
-
-::: {.grid}
-
-::: {.g-col-12 .g-col-md-4}
-::: {.card .h-100 .p-3}
-### Fixations to densities
-Kernel density estimation with configurable bandwidth and multiscale support, designed for typical eye-tracking spatial scales.
-:::
-:::
-
-::: {.g-col-12 .g-col-md-4}
-::: {.card .h-100 .p-3}
-### Template similarity
-Compare encoding and retrieval gaze with permutation baselines, scanpath comparison, and cross-recurrence summaries.
-:::
-:::
-
-::: {.g-col-12 .g-col-md-4}
-::: {.card .h-100 .p-3}
-### Reproducible by design
-A faithful port of the R `eyesim` package — same APIs, same outputs, tested against an R oracle.
-:::
-:::
-
-:::
-
-## In 30 seconds
-
-```{python}
-#| eval: false
+::: {.hero-code}
+::: {.code-card}
+[quickstart.py]{.code-card-title}
+```python
 import numpy as np
 from peyesim import fixation_group, eye_density, similarity
 
-fg1 = fixation_group(
-    x=np.random.uniform(0, 100, 25),
-    y=np.random.uniform(0, 100, 25),
-    onset=np.cumsum(np.random.uniform(0, 100, 25)),
-    duration=np.random.uniform(50, 300, 25),
-)
-fg2 = fixation_group(
-    x=np.random.uniform(0, 100, 25),
-    y=np.random.uniform(0, 100, 25),
-    onset=np.cumsum(np.random.uniform(0, 100, 25)),
-    duration=np.random.uniform(50, 300, 25),
-)
+rng = np.random.default_rng(1)
 
-ed1 = eye_density(fg1, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
-ed2 = eye_density(fg2, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
-similarity(ed1, ed2, method="pearson")
+fg = fixation_group(
+    x=rng.uniform(0, 100, 25),
+    y=rng.uniform(0, 100, 25),
+    onset=np.cumsum(rng.uniform(0, 100, 25)),
+    duration=rng.uniform(50, 300, 25),
+)
+ed = eye_density(fg, sigma=50,
+                 xbounds=(0, 100), ybounds=(0, 100))
+similarity(ed, ed, method="pearson")  # 1.0
+```
+:::
+:::
+:::
+
+## In 30 seconds {.promise-heading}
+
+A raw fixation list says *where* the eyes went. To ask whether two viewings
+land in the same places you need a spatial density and a similarity score —
+two lines once the fixations exist.
+
+```{python}
+import numpy as np
+from peyesim import fixation_group, eye_density, similarity
+
+rng = np.random.default_rng(1)
+
+def random_group():
+    return fixation_group(
+        x=rng.uniform(0, 100, 25),
+        y=rng.uniform(0, 100, 25),
+        onset=np.cumsum(rng.uniform(0, 100, 25)),
+        duration=rng.uniform(50, 300, 25),
+    )
+
+encode, retrieve = random_group(), random_group()
+
+ed_encode = eye_density(encode, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
+ed_retrieve = eye_density(retrieve, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
+
+score = similarity(ed_encode, ed_retrieve, method="pearson")
+print(f"similarity = {score:.3f}")
 ```
 
-[Read the full tutorial →](get-started.qmd)
+The same pipeline scales to trial-level tables, permutation baselines, and
+six-dimensional scanpath comparison without changing the verbs.
+
+## Three promises {.promise-heading}
+
+::: {.promise-grid}
+::: {.promise-card}
+#### Fixations to densities
+Kernel density estimation with configurable bandwidth and multiscale support, tuned for typical eye-tracking spatial scales. [Get started](get-started.qmd)
+
+[`eye_density()`]{.promise-tag}
+:::
+
+::: {.promise-card}
+#### Template similarity
+Compare encoding and retrieval gaze against permutation baselines, including cross-validated and latent-transform variants. [Tutorial](tutorials/overview.qmd)
+
+[`template_similarity()`]{.promise-tag}
+:::
+
+::: {.promise-card}
+#### Scanpath comparison
+Six-dimensional MultiMatch plus cross-recurrence summaries over the fixation trajectory itself. [Tutorial](tutorials/multimatch.qmd)
+
+[`multi_match()`]{.promise-tag}
+:::
+:::
+
+Ported from the R `eyesim` package, with tests for the R namespace exports and
+an R-oracle parity smoke check. [Browse every public function →](reference/index.qmd)

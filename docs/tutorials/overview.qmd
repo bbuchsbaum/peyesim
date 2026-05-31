@@ -9,8 +9,8 @@ execute:
 
 When you study an image, you move your eyes to different locations in a
 particular sequence. If you later see that same image during a memory test, do
-you look at the same places? This kind of "eye-movement reinstatement" is a
-powerful marker of memory, and `peyesim` gives you the tools to measure it.
+you look at the same places? This kind of "eye-movement reinstatement"
+tracks memory retrieval, and `peyesim` gives you the tools to measure it.
 
 This notebook walks you through the core workflow: representing fixations,
 computing density maps, and measuring similarity between fixation patterns

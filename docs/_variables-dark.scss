@@ -1,77 +1,134 @@
 /*-- scss:defaults --*/
-$body-bg:    #0e1116;
-$body-color: #e6e8eb;
-$link-color: #6aa3ff;
-$link-hover-color: #93bbff;
-$border-color: #20242b;
-$code-bg:    #161a21;
-$code-color: #e6e8eb;
-$navbar-bg:  #0e1116;
-$navbar-fg:  #e6e8eb;
 
-$primary-text-emphasis-dark: #93bbff;
-$secondary-text-emphasis-dark: #c4cad3;
-$success-text-emphasis-dark: #8bd9a6;
-$info-text-emphasis-dark: #8ac8ff;
-$warning-text-emphasis-dark: #ffd27a;
-$danger-text-emphasis-dark: #ff9b9b;
-$light-text-emphasis-dark: #f2f4f7;
-$dark-text-emphasis-dark: #c4cad3;
+$body-bg: #0c1117;
+$body-color: #edf2f7;
+$body-secondary-color: #aab6c6;
+$body-tertiary-color: #8593a6;
+$body-secondary-bg: #131b26;
+$body-tertiary-bg: #101827;
+$body-emphasis-color: #ffffff;
 
-$primary-bg-subtle-dark: #102044;
-$secondary-bg-subtle-dark: #1a1f27;
-$success-bg-subtle-dark: #10281b;
-$info-bg-subtle-dark: #102438;
-$warning-bg-subtle-dark: #34260d;
-$danger-bg-subtle-dark: #351517;
-$light-bg-subtle-dark: #20242b;
-$dark-bg-subtle-dark: #11151b;
+$link-color: #8bb8ff;
+$link-hover-color: #b9d4ff;
 
-$primary-border-subtle-dark: #244b91;
-$secondary-border-subtle-dark: #343b46;
-$success-border-subtle-dark: #2a7040;
-$info-border-subtle-dark: #2f638c;
-$warning-border-subtle-dark: #8a671f;
-$danger-border-subtle-dark: #7a3034;
-$light-border-subtle-dark: #343b46;
-$dark-border-subtle-dark: #20242b;
+$border-color: #243044;
+$border-color-translucent: rgba(255, 255, 255, 0.12);
 
-$body-color-dark: #e6e8eb;
-$body-bg-dark: #0e1116;
-$body-secondary-color-dark: rgba(230, 232, 235, 0.75);
-$body-secondary-bg-dark: #161a21;
-$body-tertiary-color-dark: rgba(230, 232, 235, 0.5);
-$body-tertiary-bg-dark: #11151b;
-$body-emphasis-color-dark: #ffffff;
-$border-color-dark: #20242b;
-$border-color-translucent-dark: rgba(255, 255, 255, 0.15);
-$headings-color-dark: inherit;
-$link-color-dark: #6aa3ff;
-$link-hover-color-dark: #93bbff;
-$code-color-dark: #e6e8eb;
+$code-bg: #182131;
+$code-color: #e6edf5;
+$code-block-bg: #101827;
 
-$form-select-indicator-color-dark: #e6e8eb;
-$form-select-indicator-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path fill='none' stroke='#e6e8eb' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/></svg>");
-$form-switch-color-dark: rgba(255, 255, 255, 0.25);
-$form-switch-bg-image-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'><circle r='3' fill='rgba(255, 255, 255, 0.25)'/></svg>");
-$form-valid-color-dark: #8bd9a6;
-$form-valid-border-color-dark: #8bd9a6;
-$form-invalid-color-dark: #ff9b9b;
-$form-invalid-border-color-dark: #ff9b9b;
-$accordion-icon-color-dark: #93bbff;
-$accordion-icon-active-color-dark: #93bbff;
-$accordion-button-icon-dark: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='#93bbff'><path fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/></svg>");
-$accordion-button-active-icon-dark: $accordion-button-icon-dark;
+// Navbar + sidebar share the body palette so the chrome stops fighting
+// the content. Reported issue: white sidebar on concept/reference pages.
+// NOTE: sidebar/toc colors are enforced in `scss:rules` below, not via
+// $sidebar-*/$toc-* defaults — those are not Bootstrap variables and
+// Quarto's own framework SCSS breaks if they are reassigned here.
+$navbar-bg: #0c1117;
+$navbar-fg: #dbe6f3;
+
+$card-bg: #111a26;
+$card-color: #edf2f7;
+$card-border-color: #243044;
+$card-cap-bg: #182131;
+
+$secondary: #6c757d;
+$secondary-color: #aab6c6;
 
 /*-- scss:rules --*/
-pre, .sourceCode {
-  border: 1px solid #20242b !important;
-  background: #11151b !important;
+
+// The dark color sat only on <body>; <html> was transparent, so the
+// browser's white canvas showed through the left gutter and below the
+// short floating sidebar. Paint the root so no white can leak.
+html {
+  background-color: #0c1117;
 }
-code:not(pre code) { background: #1a1f27; }
+html,
+body {
+  min-height: 100%;
+}
+
 .navbar {
-  background: rgba(14,17,22,0.85) !important;
-  border-bottom: 1px solid #20242b;
+  border-bottom: 1px solid #1d2634;
+  background: rgba(12, 17, 23, 0.94);
+  backdrop-filter: saturate(180%) blur(8px);
 }
-table th { border-bottom: 2px solid #e6e8eb; }
-table td { border-bottom: 1px solid #20242b; }
+.navbar .nav-link,
+.navbar-brand {
+  color: #dbe6f3 !important;
+}
+.navbar .nav-link.active,
+.navbar .nav-link:hover,
+.navbar-brand:hover {
+  color: #ffffff !important;
+}
+
+.sidebar nav[role="doc-toc"],
+.sidebar,
+.sidebar-navigation,
+.sidebar-menu-container {
+  background: #0d141e;
+  color: #b8c4d4;
+}
+.sidebar a,
+.sidebar-item-text {
+  color: #b8c4d4;
+}
+.sidebar-item.active > .sidebar-item-container .sidebar-item-text {
+  color: #8bb8ff;
+  font-weight: 650;
+}
+nav[role="doc-toc"] ul > li > a.active,
+nav[role="doc-toc"] ul > li > a:hover {
+  color: #8bb8ff;
+  border-left-color: #68a2ff;
+}
+
+code:not(pre code) {
+  background: #182131;
+  color: #e6edf5;
+  border: 1px solid #26364b;
+}
+
+.card {
+  background-color: #111a26;
+  color: #edf2f7;
+  border-color: #243044 !important;
+}
+.card:hover {
+  border-color: #3a5380 !important;
+}
+.card .card-title,
+.card h1,
+.card h2,
+.card h3,
+.card h4,
+.card h5,
+.card h6,
+.card p {
+  color: #edf2f7;
+}
+.card a {
+  color: #8bb8ff;
+}
+
+.nav-footer,
+footer.footer,
+.footer {
+  background: #0c1117;
+  color: #aab6c6;
+  border-top: 1px solid #1d2634;
+}
+.nav-footer a,
+.footer a,
+.toc-action {
+  color: #b8c4d4;
+}
+
+.quarto-title .subtitle,
+.hero p.lead {
+  color: #aab6c6;
+}
+
+a {
+  text-decoration-color: rgba(139, 184, 255, 0.4);
+}
