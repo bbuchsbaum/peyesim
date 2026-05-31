@@ -111,18 +111,20 @@ ssdf = pd.DataFrame(records)
 ```
 
 ```{python}
+#| fig-width: 8
+#| fig-height: 8
+#| out-width: "100%"
 metrics = ["mm_vector", "mm_direction", "mm_length",
            "mm_position", "mm_duration", "mm_position_emd"]
 labels = ["Vector", "Direction", "Length", "Position", "Duration", "EMD"]
 colors = ["blue", "green", "red", "purple", "orange", "cyan"]
 
-fig, axes = plt.subplots(6, 1, figsize=(8, 12))
-for ax, m, lbl, c in zip(axes, metrics, labels, colors):
+fig, axes = plt.subplots(3, 2, figsize=(8, 8), constrained_layout=True)
+for ax, m, lbl, c in zip(axes.ravel(), metrics, labels, colors):
     ax.hist(ssdf[m].dropna(), bins=40, color=c, alpha=0.7)
     ax.set_xlabel("Similarity")
     ax.set_ylabel("Count")
     ax.set_title(f"{lbl} Similarity")
-plt.tight_layout()
 plt.show()
 ```
 
