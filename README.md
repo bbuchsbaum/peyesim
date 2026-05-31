@@ -1,5 +1,9 @@
 # peyesim
 
+[Documentation](https://bbuchsbaum.github.io/peyesim/) ·
+[API reference](https://bbuchsbaum.github.io/peyesim/reference/) ·
+[Source](https://github.com/bbuchsbaum/peyesim)
+
 Python port of the R [eyesim](https://github.com/bbuchsbaum/eyesim) package for analyzing eye-movement data.
 
 `peyesim` provides tools for comparing fixation patterns across experimental conditions — measuring eye-movement reinstatement, scanpath similarity, and density-based overlap. It is designed for memory researchers studying how gaze patterns change between encoding and retrieval.
@@ -42,14 +46,15 @@ similarity(ed1, ed2, method="pearson")
 
 ## Documentation
 
-Full tutorials and API reference pages live in the Quarto documentation:
+The rendered documentation site is available at
+[bbuchsbaum.github.io/peyesim](https://bbuchsbaum.github.io/peyesim/).
 
-- [Get started](docs/get-started.qmd) — fixations, density maps, and a first similarity score
-- [Comparing Eye-Movement Patterns](docs/tutorials/overview.qmd) — template similarity and multiscale analysis
-- [Comparing Scanpaths with MultiMatch](docs/tutorials/multimatch.qmd) — scanpath comparison across six dimensions
-- [Measuring Similarity Across Repeated Viewings](docs/tutorials/repetitive-similarity.qmd) — within- vs. cross-stimulus similarity
-- [Latent Transforms for Template Similarity](docs/tutorials/latent-transforms.qmd) — PCA, CORAL, CCA, and geometric alignment
-- [API reference](docs/reference/index.qmd) — public functions and data structures
+- [Get started](https://bbuchsbaum.github.io/peyesim/get-started.html) — fixations, density maps, and a first similarity score
+- [Comparing Eye-Movement Patterns](https://bbuchsbaum.github.io/peyesim/tutorials/overview.html) — template similarity and multiscale analysis
+- [Comparing Scanpaths with MultiMatch](https://bbuchsbaum.github.io/peyesim/tutorials/multimatch.html) — scanpath comparison across six dimensions
+- [Measuring Similarity Across Repeated Viewings](https://bbuchsbaum.github.io/peyesim/tutorials/repetitive-similarity.html) — within- vs. cross-stimulus similarity
+- [Latent Transforms for Template Similarity](https://bbuchsbaum.github.io/peyesim/tutorials/latent-transforms.html) — PCA, CORAL, CCA, and geometric alignment
+- [API reference](https://bbuchsbaum.github.io/peyesim/reference/) — public functions and data structures
 
 ## Key features
 

@@ -30,6 +30,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
+[project.urls]
+Documentation = "https://bbuchsbaum.github.io/peyesim/"
+Repository = "https://github.com/bbuchsbaum/peyesim"
+Issues = "https://github.com/bbuchsbaum/peyesim/issues"
+
 [project.optional-dependencies]
 data = ["pyreadr>=0.5"]
 dev = ["pytest>=7", "pytest-xdist"]

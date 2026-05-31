@@ -35,11 +35,16 @@ jobs:
         run: |
           python -c "import importlib.metadata as md; print('quartodoc', md.version('quartodoc')); print('griffe', md.version('griffe'))"
 
-      - name: Build API reference
-        run: cd docs && quartodoc build --config _quartodoc.yml
+      - name: Lint authored docs
+        run: python tools/docs_lint.py
 
-      - name: Render site
-        run: cd docs && quarto render
+      - name: Build docs site
+        run: |
+          cd docs
+          quartodoc build --config _quartodoc.yml
+          quarto render
+
+      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
