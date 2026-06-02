@@ -149,6 +149,86 @@ distortion matches the model. This example is intentionally fit and evaluated
 on the same rows, so it shows what the transform can recover, not a
 leakage-free effect estimate.
 
+## A CORAL-positive control
+
+CORAL is useful when the two domains differ by covariance structure rather
+than a simple geometric warp. The example below creates matched four-element
+density maps, then stretches the source domain along different latent axes.
+Raw cosine similarity is already fairly high, but CORAL should recover the
+known covariance alignment.
+
+```{python}
+def make_tiny_density(vec):
+    """Create a small EyeDensity from a four-element vector."""
+    return EyeDensity(
+        x=np.arange(1, 3),
+        y=np.arange(1, 3),
+        z=np.asarray(vec, dtype=float).reshape(2, 2),
+        sigma=50,
+    )
+
+
+rng = np.random.default_rng(123)
+n_coral = 80
+base_mat = rng.normal(size=(n_coral, 4))
+scale_mat = np.diag([2.0, 0.6, 1.7, 0.8])
+source_mat = base_mat @ scale_mat
+
+coral_ref_tab = pd.DataFrame({
+    "id": np.arange(n_coral),
+    "density": [make_tiny_density(row) for row in base_mat],
+})
+
+coral_source_tab = pd.DataFrame({
+    "id": np.arange(n_coral),
+    "density": [make_tiny_density(row) for row in source_mat],
+})
+```
+
+```{python}
+raw_coral = template_similarity(
+    coral_ref_tab, coral_source_tab,
+    match_on="id",
+    permutations=0,
+    method="cosine",
+)
+
+coral_positive = template_similarity(
+    coral_ref_tab, coral_source_tab,
+    match_on="id",
+    permutations=0,
+    method="cosine",
+    similarity_transform=coral_transform,
+    similarity_transform_args={"comps": 4, "shrink": 1e-6},
+)
+
+raw_coral_mean = raw_coral["eye_sim"].mean()
+coral_positive_mean = coral_positive["eye_sim"].mean()
+
+print(f"Raw mean similarity:   {raw_coral_mean:.3f}")
+print(f"CORAL mean similarity: {coral_positive_mean:.3f}")
+assert coral_positive_mean > raw_coral_mean, "CORAL should improve this positive control"
+```
+
+```{python}
+fig, ax = plt.subplots(figsize=(5, 3.5))
+ax.bar(
+    ["Raw", "CORAL"],
+    [raw_coral_mean, coral_positive_mean],
+    color=["#6b7280", "#2563eb"],
+    alpha=0.85,
+)
+ax.set_ylim(0.85, 1.0)
+ax.set_ylabel("Mean cosine similarity")
+ax.set_title("CORAL recovers the simulated covariance shift")
+plt.tight_layout()
+plt.show()
+```
+
+This is still an in-sample diagnostic. It is useful because it proves the
+transform hook can recover a known domain shift, but it should not be reported
+as an out-of-sample effect estimate.
+
 ## Leakage and double-dipping
 
 This point matters for any learned transform.
@@ -285,6 +365,6 @@ After the transform, `template_similarity()` still uses your chosen `method`
 - CORAL and CCA are linear; they will not correct nonlinear spatial warps.
   `contract_transform()` and `affine_transform()` help with simple geometric
   distortion, but not highly nonlinear warps.
-  Keep `comps` low to reduce overfitting, especially with few pairs.
+- Keep `comps` low to reduce overfitting, especially with few pairs.
 - See the [Overview notebook](overview.qmd) for the core `template_similarity()` workflow
   without transforms.

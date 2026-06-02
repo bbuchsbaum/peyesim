@@ -132,6 +132,75 @@ Each metric has a distinct baseline distribution. Direction similarity, for
 instance, clusters near 0.5 for random pairs, while position similarity is
 typically lower.
 
+## What do extreme matches look like?
+
+The histograms are useful, but the fastest way to understand each metric is to
+inspect the scanpath pairs at the extremes. Here we find, for each metric, the
+highest-scoring and lowest-scoring pair from the random simulation above:
+
+```{python}
+metric_names = ["vector", "direction", "length", "position", "duration", "position_emd"]
+
+extremes = {
+    metric: {
+        "high": ssdf[f"mm_{metric}"].idxmax(),
+        "low": ssdf[f"mm_{metric}"].idxmin(),
+    }
+    for metric in metric_names
+}
+```
+
+```{python}
+#| fig-width: 8
+#| fig-height: 11
+#| out-width: "100%"
+def plot_fixation_path(ax, fg, title, score):
+    tab = fg.to_pandas(copy=True)
+    ax.plot(tab["x"], tab["y"], color="#4f46e5", linewidth=1.4, marker="o", markersize=3.5)
+    ax.scatter(tab["x"].iloc[0], tab["y"].iloc[0], color="#16a34a", s=36, zorder=3)
+    ax.scatter(tab["x"].iloc[-1], tab["y"].iloc[-1], color="#dc2626", s=36, zorder=3)
+    ax.set_xlim(0, 500)
+    ax.set_ylim(0, 500)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title(f"{title}\nscore = {score:.2f}", fontsize=9)
+    ax.tick_params(labelsize=7)
+
+
+def plot_extreme_grid(which):
+    fig, axes = plt.subplots(len(metric_names), 2, figsize=(8, 11), constrained_layout=True)
+
+    for row, metric in enumerate(metric_names):
+        idx = extremes[metric][which]
+        fg_a, fg_b = fgs_list[idx]
+        score = ssdf.loc[idx, f"mm_{metric}"]
+
+        plot_fixation_path(axes[row, 0], fg_a, f"{metric}: path A", score)
+        plot_fixation_path(axes[row, 1], fg_b, f"{metric}: path B", score)
+
+    fig.suptitle(f"{which.title()}-scoring scanpath pairs by metric", fontsize=12)
+    return fig
+
+
+plot_extreme_grid("high")
+plt.show()
+```
+
+The high-scoring examples show that a metric can look sensible even when
+another dimension of the same pair is unremarkable. For example, a pair may
+score high on duration while its spatial trajectory is not especially similar.
+
+```{python}
+#| fig-width: 8
+#| fig-height: 11
+#| out-width: "100%"
+plot_extreme_grid("low")
+plt.show()
+```
+
+The low-scoring examples are just as important. They show which visual
+differences each metric penalizes: spatial displacement for position, angular
+changes for direction, and temporal mismatch for duration.
+
 ## How do transformations affect the metrics?
 
 Understanding how each metric responds to spatial and temporal transformations

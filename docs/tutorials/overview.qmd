@@ -270,6 +270,65 @@ print(f"Multiscale mean:   {simres_multi['eye_sim_diff'].mean():.4f}")
 Multiscale analysis provides a more robust similarity estimate by averaging
 across spatial resolutions.
 
+## How does similarity evolve over time?
+
+The previous analyses summarize each trial with a single density map. Sometimes
+you want to know when retrieval fixations land on encoding-hot regions. Use
+`sample_density_time()` to sample the encoding template at each retrieval
+fixation over a sequence of time points:
+
+```{python}
+enc_temporal = enc_dens.copy()
+ret_temporal = eyetab[eyetab["phase"] == "retrieval"].reset_index(drop=True).copy()
+
+enc_temporal["match_key"] = (
+    enc_temporal["participant"].astype(str) + "_" + enc_temporal["image"].astype(str)
+)
+ret_temporal["match_key"] = (
+    ret_temporal["participant"].astype(str) + "_" + ret_temporal["image"].astype(str)
+)
+
+temporal = sample_density_time(
+    template_tab=enc_temporal,
+    source_tab=ret_temporal,
+    match_on="match_key",
+    times=np.arange(0, 501, 50),
+    time_bins=np.array([0, 250, 500]),
+    permutations=10,
+    permute_on="participant",
+)
+
+temporal[
+    ["participant", "image", "bin_1", "perm_bin_1", "diff_bin_1",
+     "bin_2", "perm_bin_2", "diff_bin_2"]
+].head()
+```
+
+The `sampled` column contains the full time course for each retrieval trial.
+The `bin_*` columns summarize early and late windows, while `diff_bin_*`
+subtracts a participant-stratified permutation baseline.
+
+```{python}
+time_rows = []
+for _, row in temporal.head(6).iterrows():
+    sampled = row["sampled"].copy()
+    sampled["trial"] = f"{row['participant']} / {row['image']}"
+    time_rows.append(sampled)
+
+time_series = pd.concat(time_rows, ignore_index=True)
+
+fig, ax = plt.subplots(figsize=(8, 4))
+for trial, group in time_series.groupby("trial"):
+    ax.plot(group["time"], group["z"], marker="o", linewidth=1.4, label=trial)
+
+ax.set_xlabel("Retrieval time")
+ax.set_ylabel("Encoding density at fixation")
+ax.set_title("Temporal sampling of encoding templates")
+ax.legend(fontsize=8, ncol=2)
+plt.tight_layout()
+plt.show()
+```
+
 ## What's next?
 
 - [MultiMatch](multimatch.qmd) — compare scanpath structure across five dimensions
