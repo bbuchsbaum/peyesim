@@ -9,7 +9,7 @@ import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
 from sklearn.decomposition import PCA
 
-from peyesim.density import EyeDensity, EyeDensityMultiscale
+from peyesim.density import EyeDensity, EyeDensityMultiscale, _zapsmall
 
 
 def _vectorize_density(obj) -> np.ndarray:
@@ -195,7 +195,9 @@ def coral_transform(
         cov_ref = _cov_with_shrink(proj["ref_scores"][ref_rows, :], shrink)
         cov_src = _cov_with_shrink(proj["source_scores"][src_rows, :], shrink)
         adapt = _mat_inv_sqrt(cov_src, shrink) @ _mat_sqrt(cov_ref)
-        adapted_src[src_rows, :k] = (adapt @ proj["source_scores"][src_rows, :k].T).T
+        # Scores are rows, so CORAL maps X -> X Cs^{-1/2} Ct^{1/2}, which gives
+        # the adapted scores the reference covariance.
+        adapted_src[src_rows, :k] = proj["source_scores"][src_rows, :k] @ adapt
         group_info.append({
             "group": group_label,
             "ref_n": int(len(ref_rows)),
@@ -397,7 +399,7 @@ def _apply_coral_model(model, ref_tab, source_tab, refvar, sourcevar):
         if adapt is None:
             continue
         src_rows = np.flatnonzero(src_keys == group_key)
-        adapted_src[src_rows, :] = (adapt @ src_scores[src_rows, :].T).T
+        adapted_src[src_rows, :] = src_scores[src_rows, :] @ adapt
     ref_tab = ref_tab.copy()
     source_tab = source_tab.copy()
     ref_tab[refvar] = _split_rows(ref_scores)
@@ -540,18 +542,29 @@ def _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar,
             })
             continue
 
+        k_group = min(k_use, len(cca["cor"]))
+        if k_group < 1:
+            group_info.append({
+                "group": group_label,
+                "matched_pairs": n_pairs,
+                "comps": 0,
+                "note": "no canonical components",
+            })
+            continue
+
         group_models[group_key] = {
-            "k": k_use,
+            "k": k_group,
+            "k_in": k_use,
             "ref_fit": ref_fit,
             "src_fit": src_fit,
-            "xcoef": cca["xcoef"][:, :k_use],
-            "ycoef": cca["ycoef"][:, :k_use],
+            "xcoef": cca["xcoef"][:, :k_group],
+            "ycoef": cca["ycoef"][:, :k_group],
         }
         group_info.append({
             "group": group_label,
             "matched_pairs": n_pairs,
-            "comps": k_use,
-            "cor": cca["cor"][:k_use],
+            "comps": k_group,
+            "cor": cca["cor"][:k_group],
             "note": "ok",
         })
 
@@ -577,19 +590,36 @@ def _apply_cca_model(model, ref_tab, source_tab, refvar, sourcevar):
     src_latent = src_scores.copy()
     ref_keys, src_keys = _transform_group_keys(ref_tab, source_tab, model.get("fit_by"))
     group_levels = list(dict.fromkeys([*ref_keys.tolist(), *src_keys.tolist()]))
+    # Fitted rows hold their group's canonical variates followed by zeros, so
+    # the output keeps the PCA width but similarity is never computed over a
+    # mix of canonical and PCA coordinates.
+    unfitted = []
     for group_key in group_levels:
         group_model = model.get("group_models", {}).get(group_key)
         if group_model is None:
+            if np.any(src_keys == group_key):
+                unfitted.append("all" if group_key == "__all__" else str(group_key))
             continue
         k = group_model["k"]
+        k_in = group_model.get("k_in", group_model["xcoef"].shape[0])
         ref_rows = np.flatnonzero(ref_keys == group_key)
         src_rows = np.flatnonzero(src_keys == group_key)
         if len(ref_rows) > 0:
-            X = _apply_scale_with_shrink(ref_scores[ref_rows, :k], group_model["ref_fit"])
+            X = _apply_scale_with_shrink(ref_scores[ref_rows, :k_in], group_model["ref_fit"])
+            ref_latent[ref_rows, :] = 0.0
             ref_latent[ref_rows, :k] = X @ group_model["xcoef"]
         if len(src_rows) > 0:
-            Y = _apply_scale_with_shrink(src_scores[src_rows, :k], group_model["src_fit"])
+            Y = _apply_scale_with_shrink(src_scores[src_rows, :k_in], group_model["src_fit"])
+            src_latent[src_rows, :] = 0.0
             src_latent[src_rows, :k] = Y @ group_model["ycoef"]
+
+    if unfitted:
+        warnings.warn(
+            "cca_transform: no CCA model for group(s) "
+            + ", ".join(dict.fromkeys(unfitted))
+            + "; their rows keep PCA scores.",
+            stacklevel=2,
+        )
 
     ref_tab[refvar] = _split_rows(ref_latent)
     source_tab[sourcevar] = _split_rows(src_latent)
@@ -827,6 +857,7 @@ def _warp_density(dens: EyeDensity, A: np.ndarray, t: np.ndarray) -> EyeDensity:
     total = new_z.sum()
     if np.isfinite(total) and total > np.finfo(float).eps:
         new_z = new_z / total
+    new_z = _zapsmall(new_z, digits=7)
 
     return EyeDensity(
         x=dens.x.copy(), y=dens.y.copy(), z=new_z,

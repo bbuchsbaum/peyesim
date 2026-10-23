@@ -63,13 +63,14 @@ The rendered documentation site is available at
 - **MultiMatch** — scanpath comparison across vector, direction, length, position, duration, and EMD dimensions
 - **CRQA** — cross-recurrence summaries for multidimensional fixation trajectories
 - **Repetitive similarity** — within- vs. cross-stimulus consistency
+- **Revisitation** — returns to previously fixated locations, with subject- or item-matched spatial nulls, and visual-angle ↔ pixel conversion
 - **Latent transforms** — PCA, CORAL, and CCA for cross-device/cross-participant domain adaptation
 - **Similarity methods** — Pearson, Spearman, Fisher z, cosine, L1, Jaccard, distance covariance, EMD
-- **Visualization** — static fixation/density plots and scanpath animation with optional matplotlib support
+- **Visualization** — static fixation/density plots and scanpath animation (matplotlib), sharing eyesim's colour roles and density/time ramps
 
 ## Lineage
 
-This is a Python port of the R [eyesim](https://github.com/bbuchsbaum/eyesim) package. The R package source is included in the `eyesim/` directory for reference.
+This is a Python port of the R [eyesim](https://github.com/bbuchsbaum/eyesim) package (synced to eyesim 0.3.0, excluding the experimental GazeWeave models). The `eyesim/` entry points at the R source; with R and the source available, `tests/test_parity_*.py` check results against R live. See [PARITY.md](PARITY.md).
 
 ## License
 

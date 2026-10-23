@@ -117,10 +117,13 @@ def test_template_similarity_cosine_permutations_match_manual_baseline():
     for i, mi in enumerate(matchind):
         d2 = source_tab["density"].iloc[i]
         eye_sim = similarity(ref_tab["density"].iloc[mi], d2, method="cosine")
-        candidates = list(match_split[str(source_tab["subject"].iloc[i])])
+        # R eyesim >= 0.3.0: drop every copy of the true match, keep each
+        # other template once, then sample from the remaining candidates.
+        candidates = list(dict.fromkeys(
+            c for c in match_split[str(source_tab["subject"].iloc[i])] if c != mi
+        ))
         if 2 < len(candidates):
             candidates = list(np.random.choice(candidates, 2, replace=False))
-        candidates = [candidate for candidate in candidates if candidate != mi]
         perm_vals = [similarity(ref_tab["density"].iloc[j], d2, method="cosine") for j in candidates]
         perm_sim = np.nan if len(perm_vals) == 0 else float(np.nanmean(perm_vals))
         manual_rows.append({
@@ -128,15 +131,17 @@ def test_template_similarity_cosine_permutations_match_manual_baseline():
             "eye_sim": eye_sim,
             "perm_sim": perm_sim,
             "eye_sim_diff": eye_sim - perm_sim,
+            "n_perm": len(perm_vals),
         })
     manual = pd.DataFrame(manual_rows)
 
-    fast = fast.sort_values("row_id")[["row_id", "eye_sim", "perm_sim", "eye_sim_diff"]].reset_index(drop=True)
+    fast = fast.sort_values("row_id")[["row_id", "eye_sim", "perm_sim", "eye_sim_diff", "n_perm"]].reset_index(drop=True)
     manual = manual.sort_values("row_id").reset_index(drop=True)
     pd.testing.assert_series_equal(fast["row_id"], manual["row_id"], check_names=False)
     np.testing.assert_allclose(fast["eye_sim"], manual["eye_sim"], atol=1e-10)
     np.testing.assert_allclose(fast["perm_sim"], manual["perm_sim"], atol=1e-10)
     np.testing.assert_allclose(fast["eye_sim_diff"], manual["eye_sim_diff"], atol=1e-10)
+    np.testing.assert_array_equal(fast["n_perm"], manual["n_perm"])
 
 
 def test_template_similarity_cosine_exhaustive_within_stratum_baseline():

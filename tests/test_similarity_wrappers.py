@@ -73,10 +73,19 @@ def test_fixation_similarity_overlap_returns_scalar():
     enc = eyetab[eyetab["phase"] == "enc"].reset_index(drop=True)
     ret = eyetab[eyetab["phase"] == "ret"].reset_index(drop=True)
 
-    result = fixation_similarity(enc, ret, match_on="image", method="overlap")
+    result = fixation_similarity(enc, ret, match_on="image", method="overlap",
+                                 time_samples=np.arange(0, 1000, 20))
     assert "eye_sim" in result.columns
     assert result["eye_sim"].dtype == float
     assert len(result) == 2
+
+
+def test_fixation_similarity_overlap_requires_time_samples():
+    eyetab = _make_eyetab()
+    enc = eyetab[eyetab["phase"] == "enc"].reset_index(drop=True)
+    ret = eyetab[eyetab["phase"] == "ret"].reset_index(drop=True)
+    with pytest.raises(ValueError, match="time_samples"):
+        fixation_similarity(enc, ret, match_on="image", method="overlap")
 
 
 # ---- Bug 1: fixation_similarity with sinkhorn ----

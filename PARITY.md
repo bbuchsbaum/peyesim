@@ -1,14 +1,118 @@
 # peyesim parity audit
 
-This file tracks the Python port against the local R source at `eyesim/`.
+This file tracks the Python port against the R source at `eyesim/` (a symlink
+to the R checkout; set `EYESIM_SOURCE_DIR` to point elsewhere).
 
 ## Objective
 
 Port `~/code/eyesim` to idiomatic Python with full behavioral parity where the
 R package exposes user-facing functionality, plus Python packaging quality
-expected of a scientific library.
+expected of a scientific library. GazeWeave (`gaze_*`,
+`fit_gaze_replay_model`) is experimental in R and deliberately not ported.
 
-## Current evidence
+## Synced to R eyesim 0.3.0 (development, October 2026)
+
+The port was first written against eyesim at `1580ec9` (March 2026). It now
+tracks eyesim `9ce29bc` (0.3.0 plus `fixation_revisits()`), excluding
+GazeWeave. Changes brought over in that sync:
+
+- **New functions:** `fixation_revisits()` (fixation groups and eye tables,
+  with `null = "none" | "subject" | "item"`), `revisit_summary()`,
+  `visual_angle_to_px()`, `px_to_visual_angle()`, `eyesim_colours()`,
+  `theme_eyesim()`, `theme_eyesim_spatial()`, and the density/time colour
+  maps (`eyesim_density_cmap()`, `eyesim_time_cmap()`, the counterparts of
+  `scale_fill_eyesim_density()` and `scale_colour_eyesim_time()`).
+- **Permutation baselines:** every copy of the true match is removed before
+  sampling, each other template counts once, and results carry `n_perm`.
+  `template_similarity_cv()` draws its permutations from `seed` and leaves
+  NumPy's global random state untouched. `sample_density_time()` uses the same
+  candidate rule, and its last time bin is half-open.
+- **Similarity:** maps on different lattices raise `LatticeMismatchError`
+  (also through multiscale maps and `repetitive_similarity()`); Fisher z
+  snaps perfect correlations to one clamped value; `dcov` uses an O(n log n)
+  distance correlation; EMD normalises weights and drops zero-mass cells, and
+  the saliency EMD is Rubner's partial matching on raw masses;
+  `fixation_overlap()` builds its default time grid from both groups and
+  leaves time before the first fixation out of `perc`; the similarity overlap
+  threshold defaults to 60 and needs `time_samples`.
+- **Density and fixations:** `eye_density()` validates `sigma` and `kde_pkg`,
+  takes explicit `weights`, returns `None` for zero weight, checks extra
+  `ks::kde()` arguments, and rounds like `zapsmall(z, digits = 7)`;
+  `suggest_sigma()` returns NaN without spread; entropy rejects signed maps
+  and forwards `aggregate`; `sample_fixations()` orders by onset;
+  `rep_fixations()` counts without floating-point loss; empty fixation groups
+  work; `calcangle()` clamps; `crqa()` honours `delay`, `embed`, `rescale` and
+  `metric`.
+- **Transforms and regression:** CORAL applies `X Cs^-1/2 Ct^1/2`; CCA zeroes
+  the columns after the canonical variates and warns for unfitted groups;
+  `mm_position_emd` uses all fixations; `template_regression()` gains
+  `density_var` and refuses duplicated or missing baseline keys;
+  `template_multireg()` defaults to `lm`; `template_sample()` drops rows with a
+  missing template or fixation group.
+- **Plots:** the eyesim 0.2.0 visual system in matplotlib (see
+  `peyesim.visualization` for what is approximate).
+
+The sync also fixed long-standing divergences the new oracle exposed:
+`method="jaccard"` now uses R's extended (Tanimoto) Jaccard;
+`method="sinkhorn"` for fixation groups now computes R's duration-weighted
+entropic OT distance in (x, y, onset) space with T4transport's Sinkhorn
+iterations; `sample_density()` rounds the grid index half-to-even on R's
+1-based scale and returns NaN (not an edge cell) before the first onset;
+`ks`-path densities now truncate each kernel at `supp = 3.7` SDs as
+`ks::kde()` does; and `crqa(rescale=...)` follows `crqa::crqa`.
+
+## Live R parity tests
+
+`tests/r_oracle.py` runs R code against `pkgload::load_all()` of the R source
+and returns its results as JSON; each `tests/test_parity_*.py` module (and the
+R-backed tests in `test_fixation_revisits.py`, `test_visual_angle.py`,
+`test_visualization.py` and `test_public_api_parity.py`) runs one R script and
+compares. The tests skip when `Rscript`, `pkgload`/`jsonlite` or the R source
+tree are missing. Fixtures are deterministic and permutation baselines are
+exhaustive, so no cross-language random stream is involved. Optional R
+packages used by the oracle: `crqa`, `emdist`, `energy`, `transport`,
+`T4transport`, `ppcor`, `nnls`, `MASS`, `ks`.
+
+```bash
+export EYESIM_SOURCE_DIR=/path/to/eyesim   # default: ./eyesim
+python -m pytest -q                          # parity tests run when R is found
+python tools/r_oracle_parity.py              # older single-script oracle
+```
+
+## Known differences from R
+
+- **Random streams.** Permutation subsets, `simulate_eye_table()` and other
+  random draws cannot reproduce R's streams; parity is checked with
+  exhaustive baselines. CV fold membership still uses R's `sample()` order
+  when `Rscript` is available.
+- **EMD on large grids.** `emdist` stops after 500 iterations (with a
+  warning) and then returns a non-optimal, larger distance. peyesim solves
+  exactly; on such grids it agrees with R's exact `transport::wasserstein`,
+  not with `emdist`. Where `emdist` converges the two agree to about 1e-9
+  (`emdist` works in single precision).
+- **Binned ks KDE.** `ks::kde()` bins by default above 500 fixations;
+  peyesim always evaluates the exact estimate and raises
+  `NotImplementedError` for `binned=True`.
+- **Component signs.** PCA/CCA scores may differ in sign from R; parity is
+  checked through sign-invariant results (similarities, covariances).
+- **`estimate_scale()`** uses SciPy's L-BFGS-B on a non-smooth objective and
+  agrees with R's `optim()` to about 1e-3.
+- **Plots** are matplotlib, not pixel-compatible with ggplot2; label
+  placement and title wrapping are simplified.
+- **Kept in Python only:** `density_matrix()` (R removed its empty generic;
+  the Python function has a real implementation) and the
+  `wynn_study_image` dataset (R dropped it to stay within CRAN's size limit).
+
+## Verified gates
+
+- `python -m pytest -q` with and without R available.
+- `python tools/r_oracle_parity.py`.
+- `python -m build --sdist --wheel --no-isolation` and wheel/editable
+  import smoke checks (from the initial port).
+
+## Earlier audit notes
+
+### Evidence at the initial port (eyesim 1580ec9)
 
 - R `NAMESPACE` exports: 41 functions.
 - Python public API now covers all R `NAMESPACE` exports via
@@ -26,7 +130,7 @@ expected of a scientific library.
   `eye_frame.R` is represented by `eye_table.py`;
   `transform_utils.R` is represented by visualization transform helpers.
 
-## Verified gates
+### Gates at the initial port
 
 - `python -m pytest -q`
 - `pytest -q`
@@ -37,7 +141,7 @@ expected of a scientific library.
 - `python tools/r_oracle_parity.py` for deterministic cross-language checks
   against the local R package loaded with `pkgload::load_all("eyesim")`.
 
-## Remaining parity risks
+### Parity risks noted at the initial port
 
 - The current R-oracle script checks core geometry, scanpath, fixation sampling,
   fixation overlap, density sampling, KDE density generation with and without

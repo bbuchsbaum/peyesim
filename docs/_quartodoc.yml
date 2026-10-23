@@ -95,12 +95,25 @@ quartodoc:
         - estimate_scale
         - match_scale
 
+    - title: "Revisitation and display geometry"
+      desc: "Returns to previously fixated locations, and visual-angle conversion."
+      contents:
+        - fixation_revisits
+        - revisit_summary
+        - visual_angle_to_px
+        - px_to_visual_angle
+
     - title: "Visualization"
       desc: "Plot fixations, densities, and animated scanpaths."
       contents:
         - plot_fixation_group
         - plot_eye_density
         - anim_scanpath
+        - eyesim_colours
+        - eyesim_density_cmap
+        - eyesim_time_cmap
+        - theme_eyesim
+        - theme_eyesim_spatial
 
     - title: "Datasets"
       desc: "Bundled example data."

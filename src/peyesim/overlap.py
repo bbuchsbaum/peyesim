@@ -25,17 +25,23 @@ def fixation_overlap(
         Distance threshold for overlap.
     time_samples : array-like or None
         Time points at which to evaluate.  Defaults to
-        ``np.arange(0, max(x.onset), 20)``.
+        ``seq(0, max(onset of x and y), by = 20)``, built from both groups so
+        the measure is symmetric in ``x`` and ``y``.
     dist_method : str
-        ``'euclidean'`` or ``'cityblock'`` (Manhattan).
+        ``'euclidean'`` or ``'manhattan'``.
 
     Returns
     -------
     dict
-        ``{'overlap': int, 'perc': float}``
+        ``{'overlap': int, 'perc': float}``. ``perc`` is the proportion of
+        compared time points at which the groups overlap; time points before
+        either group's first fixation are not compared (``nan`` if none are).
     """
     if time_samples is None:
-        time_samples = np.arange(0, x["onset"].max() + 1, 20)
+        top = max(np.nanmax(np.asarray(x["onset"], dtype=float)),
+                  np.nanmax(np.asarray(y["onset"], dtype=float)))
+        # R seq(0, top, by = 20), including its 1e-10 tolerance at the end.
+        time_samples = 20.0 * np.arange(int(np.floor(top / 20 + 1e-10)) + 1)
 
     method_map = {"euclidean": "euclidean", "manhattan": "cityblock"}
     if dist_method not in method_map:
@@ -54,6 +60,9 @@ def fixation_overlap(
 
     valid = ~np.isnan(d)
     overlap = int((d[valid] < dthresh).sum())
-    perc = overlap / len(d) if len(d) > 0 else 0.0
+    # Time points before either group's first fixation have no gaze position
+    # to compare, so they are left out of the denominator.
+    n_compared = int(valid.sum())
+    perc = overlap / n_compared if n_compared > 0 else np.nan
 
     return {"overlap": overlap, "perc": perc}

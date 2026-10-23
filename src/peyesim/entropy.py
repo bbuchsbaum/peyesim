@@ -26,7 +26,8 @@ def entropy_from_mass(
     ----------
     mass : array-like
         Non-negative values (counts or probabilities).  Will be
-        normalised to sum to 1 internally.
+        normalised to sum to 1 internally.  Any negative value is an error;
+        zero total mass gives ``nan``.
     normalize : bool
         If *True* divide the raw entropy by ``log(N, base)`` so the
         result lies in [0, 1].
@@ -44,8 +45,16 @@ def entropy_from_mass(
     if len(arr) == 0:
         return np.nan
 
+    # Shannon entropy needs a probability mass; a signed map (for example a
+    # difference of two densities) has none, whatever its total.
+    if np.any(arr < 0):
+        raise ValueError(
+            "fixation_entropy() requires non-negative mass, but the map has negative "
+            "values (for example a difference of two densities)."
+        )
+
     total = arr.sum()
-    if total <= 0:
+    if not np.isfinite(total) or total <= np.finfo(float).eps:
         return np.nan
 
     n_cells = len(arr)
@@ -110,16 +119,12 @@ def _entropy_fixation_group_density(
     fg: FixationGroup,
     normalize: bool,
     base: float,
-    sigma: float | None = None,
+    sigma=None,
     outdim: tuple[int, int] = (50, 50),
+    aggregate: str = "mean",
+    duration_weighted: bool = False,
     **kwargs,
-) -> float:
-    x_vals = fg["x"].to_numpy(dtype=float)
-    y_vals = fg["y"].to_numpy(dtype=float)
-
-    if len(x_vals) < 2:
-        return np.nan
-
+) -> float | dict[str, float]:
     xbounds, ybounds = _resolve_fixation_entropy_bounds(
         fg,
         xbounds=kwargs.pop("xbounds", None),
@@ -128,21 +133,27 @@ def _entropy_fixation_group_density(
 
     if sigma is None:
         sigma = suggest_sigma(fg, xbounds=xbounds, ybounds=ybounds)
-        if np.isnan(sigma) or sigma <= 0:
-            sigma = 50.0
+        # suggest_sigma() needs at least two fixations; without a bandwidth the
+        # density entropy is undefined.
+        if not np.isfinite(sigma):
+            return np.nan
 
-    ed = eye_density(
-        fg,
-        sigma=sigma,
-        xbounds=xbounds,
-        ybounds=ybounds,
-        outdim=outdim,
-        normalize=True,
-        **kwargs,
-    )
+    with warnings.catch_warnings():
+        # A group below min_fixations gives no density and an NA entropy.
+        warnings.filterwarnings("ignore", message="Not enough fixations")
+        ed = eye_density(
+            fg,
+            sigma=sigma,
+            xbounds=xbounds,
+            ybounds=ybounds,
+            outdim=outdim,
+            duration_weighted=duration_weighted,
+            **kwargs,
+        )
     if ed is None:
         return np.nan
-
+    if isinstance(ed, EyeDensityMultiscale):
+        return _entropy_multiscale(ed, normalize=normalize, base=base, aggregate=aggregate)
     return _entropy_eye_density(ed, normalize=normalize, base=base)
 
 
@@ -177,11 +188,18 @@ def _entropy_fixation_group_grid(
 
     xbounds, ybounds = _resolve_fixation_entropy_bounds(fg, xbounds=xbounds, ybounds=ybounds)
 
-    # Bin fixations into a grid
+    # Bin fixations into a grid like R's findInterval(all.inside = TRUE): a
+    # fixation outside the bounds is counted in the nearest edge cell.
     x_edges = np.linspace(xbounds[0], xbounds[1], grid_size[0] + 1)
     y_edges = np.linspace(ybounds[0], ybounds[1], grid_size[1] + 1)
 
-    counts, _, _ = np.histogram2d(x_vals, y_vals, bins=[x_edges, y_edges])
+    def cell(values, edges):
+        idx = np.searchsorted(edges, values, side="right") - 1
+        return np.clip(idx, 0, len(edges) - 2)
+
+    ok = ~(np.isnan(x_vals) | np.isnan(y_vals))
+    counts = np.zeros(grid_size, dtype=float)
+    np.add.at(counts, (cell(x_vals[ok], x_edges), cell(y_vals[ok], y_edges)), 1.0)
 
     return entropy_from_mass(counts, normalize=normalize, base=base)
 
@@ -210,7 +228,19 @@ def fixation_entropy(
     **kwargs
         Extra arguments forwarded to the density or grid computation
         (e.g. ``sigma``, ``outdim``, ``grid_size``, ``xbounds``,
-        ``ybounds``, ``aggregate``).
+        ``ybounds``, ``aggregate``).  ``aggregate`` (``"mean"`` or
+        ``"none"``) applies to multiscale densities, including a fixation
+        group with a vector ``sigma`` and ``method="density"``.
+
+    Notes
+    -----
+    Entropy needs non-negative mass: a map with a negative value is an error,
+    and zero total mass gives ``nan``. For a fixation group, ``sigma=None``
+    uses :func:`suggest_sigma`; a group with fewer than two fixations has no
+    suggested bandwidth, so its density entropy is ``nan`` (with an explicit
+    ``sigma`` it is ``nan`` too unless ``min_fixations`` is lowered). With
+    ``method="grid"`` a single fixation gives 0, and fixations outside the
+    bounds are counted in the nearest edge cell.
 
     Returns
     -------
@@ -226,20 +256,23 @@ def fixation_entropy(
         )
 
     if isinstance(x, FixationGroup):
+        aggregate = kwargs.pop("aggregate", "mean")
+        if aggregate not in ("mean", "none"):
+            raise ValueError("aggregate should be one of 'mean', 'none'.")
+        if method not in ("density", "grid"):
+            raise ValueError(
+                f"Unknown method '{method}'. Use 'density' or 'grid'."
+            )
         if len(x) == 0:
             return np.nan
 
         if method == "density":
             return _entropy_fixation_group_density(
-                x, normalize=normalize, base=base, **kwargs,
-            )
-        elif method == "grid":
-            return _entropy_fixation_group_grid(
-                x, normalize=normalize, base=base, **kwargs,
+                x, normalize=normalize, base=base, aggregate=aggregate, **kwargs,
             )
         else:
-            raise ValueError(
-                f"Unknown method '{method}'. Use 'density' or 'grid'."
+            return _entropy_fixation_group_grid(
+                x, normalize=normalize, base=base, **kwargs,
             )
 
     raise TypeError(

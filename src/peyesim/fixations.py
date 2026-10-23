@@ -114,43 +114,59 @@ class FixationGroup(_FrameBacked):
         return out
 
     def rep_fixations(self, resolution: float = 100) -> "FixationGroup":
-        """Replicate each fixation proportional to its duration."""
-        nreps = np.maximum((self["duration"] / (1.0 / resolution)).astype(int), 1)
-        out = self.loc[self.index.repeat(nreps)].reset_index(drop=True)
-        return FixationGroup(out)
+        """Replicate each fixation proportional to its duration.
+
+        Each fixation is repeated ``floor(duration * resolution)`` times, and at
+        least once. The floor tolerates floating-point error, so a duration of
+        0.29 at resolution 100 gives 29 copies rather than 28.
+        """
+        counts = self["duration"].to_numpy(dtype=float) * resolution
+        tol = np.sqrt(np.finfo(float).eps) * np.maximum(1.0, np.abs(counts))
+        nreps = np.floor(counts + tol)
+        nreps = np.where(np.isfinite(nreps) & (nreps >= 1), nreps, 1).astype(int)
+        out = self.to_pandas(copy=False).iloc[np.repeat(np.arange(len(self)), nreps)]
+        return FixationGroup(out.reset_index(drop=True))
 
     def sample_fixations(self, time: np.ndarray, fast: bool = True) -> "FixationGroup":
-        """Sample fixation coordinates at arbitrary *time* points (forward-fill)."""
-        time = np.asarray(time, dtype=float)
-        onsets = self["onset"].to_numpy()
-        xs = self["x"].to_numpy()
-        ys = self["y"].to_numpy()
-        if fast:
-            idx = np.searchsorted(onsets, time, side="right") - 1
-            valid = idx >= 0
-            idx = np.clip(idx, 0, len(onsets) - 1)
-            return FixationGroup(
-                {
-                    "x": np.where(valid, xs[idx], np.nan),
-                    "y": np.where(valid, ys[idx], np.nan),
-                    "onset": time,
-                    "duration": np.ones(len(time)),
-                }
-            )
+        """Sample fixation coordinates at arbitrary *time* points.
 
-        rows = []
-        for t in time:
-            if t < onsets[0]:
-                rows.append({"x": np.nan, "y": np.nan, "onset": t, "duration": np.nan})
-                continue
-            delta = t - onsets
-            valid = np.where(delta >= 0)[0]
-            if len(valid) == 0:
-                rows.append({"x": np.nan, "y": np.nan, "onset": t, "duration": np.nan})
-            else:
-                i = valid[-1]
-                rows.append({"x": xs[i], "y": ys[i], "onset": t, "duration": 0})
-        return FixationGroup(rows)
+        Each time point takes the coordinates of the most recent fixation whose
+        onset is at or before it; durations are not used, and the last fixation
+        is held for all later time points. Time points before the first onset
+        give ``NaN``. Fixations are first ordered by onset (stable, so the last
+        of tied onsets wins) and fixations with a missing onset are dropped.
+        ``fast=True`` uses a vectorized lookup and ``fast=False`` evaluates each
+        time point in turn; both return the same result.
+        """
+        time = np.atleast_1d(np.asarray(time, dtype=float))
+        onsets = self["onset"].to_numpy(dtype=float)
+        keep = ~np.isnan(onsets)
+        order = np.argsort(onsets[keep], kind="stable")
+        onsets = onsets[keep][order]
+        xs = self["x"].to_numpy(dtype=float)[keep][order]
+        ys = self["y"].to_numpy(dtype=float)[keep][order]
+
+        if fast:
+            # number of onsets <= t, like R's findInterval()
+            idx = np.searchsorted(onsets, time, side="right")
+        else:
+            idx = np.array([int(np.sum(onsets <= t)) for t in time], dtype=int)
+        valid = idx > 0
+        pos = np.clip(idx - 1, 0, max(len(onsets) - 1, 0))
+        if len(onsets):
+            x_out = np.where(valid, xs[pos], np.nan)
+            y_out = np.where(valid, ys[pos], np.nan)
+        else:
+            x_out = np.full(len(time), np.nan)
+            y_out = np.full(len(time), np.nan)
+        return FixationGroup(
+            {
+                "x": x_out,
+                "y": y_out,
+                "onset": time,
+                "duration": np.ones(len(time)),
+            }
+        )
 
     def summary(self) -> dict:
         """Summary statistics mirroring R's ``summary.fixation_group``."""
@@ -166,13 +182,26 @@ class FixationGroup(_FrameBacked):
         n = len(self)
         if n == 0:
             return "FixationGroup: 0 fixations"
+
+        def rng(col):
+            vals = self[col].to_numpy(dtype=float)
+            vals = vals[~np.isnan(vals)]
+            if vals.size == 0:
+                return "[NA, NA]"
+            return f"[{_r_round1(vals.min())}, {_r_round1(vals.max())}]"
+
         return (
             f"FixationGroup: {n} fixations\n"
-            f"  x range: [{self['x'].min():.1f}, {self['x'].max():.1f}]\n"
-            f"  y range: [{self['y'].min():.1f}, {self['y'].max():.1f}]\n"
-            f"  duration range: [{self['duration'].min():.1f}, {self['duration'].max():.1f}]\n"
-            f"  onset range: [{self['onset'].min():.1f}, {self['onset'].max():.1f}]"
+            f"  x range: {rng('x')}\n"
+            f"  y range: {rng('y')}\n"
+            f"  duration range: {rng('duration')}\n"
+            f"  onset range: {rng('onset')}"
         )
+
+
+def _r_round1(value: float) -> str:
+    """Format like R's ``round(value, 1)`` printed with ``cat()``."""
+    return f"{round(float(value), 1):.15g}"
 
 
 def fixation_group(

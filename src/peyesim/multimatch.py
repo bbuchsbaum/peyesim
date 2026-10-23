@@ -24,7 +24,10 @@ def install_multimatch(upgrade: bool = False) -> None:
 
 
 def _emd_position_similarity(fg1, fg2, screensize):
-    """Order-insensitive EMD-based position similarity."""
+    """Order-insensitive position similarity: ``1 - EMD / screen diagonal``.
+
+    The EMD is between all fixations of each group, weighted by duration.
+    """
     pts1 = fg1[["x", "y"]].values
     pts2 = fg2[["x", "y"]].values
     emd_val = _emdw(pts1, fg1["duration"].values, pts2, fg2["duration"].values)
@@ -159,7 +162,9 @@ def multi_match(x: Scanpath, y: Scanpath, screensize: tuple[float, float]) -> di
     position_d = _vector_diff_2d(sacx, sacy, "x", "y", cds)
     position_sim = 1 - np.median(position_d) / diag
 
-    emd_sim = _emd_position_similarity(sacx, sacy, screensize)
+    # The order-insensitive EMD compares all fixations (weighted by duration),
+    # not the saccade rows, which drop the final fixation.
+    emd_sim = _emd_position_similarity(x, y, screensize)
 
     return {
         "mm_vector": float(vector_sim),

@@ -13,7 +13,7 @@ import pandas as pd
 from scipy.spatial.distance import cosine as _cosine_dist
 from scipy.stats import spearmanr
 
-from peyesim._utils import emdw as _emdw, match_keys, filter_unmatched
+from peyesim._utils import emdw as _emdw, match_keys, filter_unmatched, sinkhorn_distance
 from peyesim.density import EyeDensity, EyeDensityMultiscale
 from peyesim.fixations import FixationGroup
 from peyesim.saccades import Scanpath
@@ -43,14 +43,18 @@ def compute_similarity(
             wy = y.z.ravel()
             if saliency_map is not None:
                 s_mat = saliency_map.z if isinstance(saliency_map, EyeDensity) else np.asarray(saliency_map)
+                if np.shape(s_mat) != np.shape(x.z):
+                    raise ValueError("saliency_map dimensions must match density maps")
                 r1 = x.z - s_mat
                 r2 = y.z - s_mat
                 pos1 = np.maximum(r1, 0).ravel()
                 neg1 = np.maximum(-r1, 0).ravel()
                 pos2 = np.maximum(r2, 0).ravel()
                 neg2 = np.maximum(-r2, 0).ravel()
-                emd_pos = _emdw(coords, pos1, coords, pos2)
-                emd_neg = _emdw(coords, neg1, coords, neg2)
+                # The residual masses differ between maps, so these are
+                # partial-matching EMDs on the raw masses.
+                emd_pos = _emdw(coords, pos1, coords, pos2, normalize=False)
+                emd_neg = _emdw(coords, neg1, coords, neg2, normalize=False)
                 return -(emd_pos + emd_neg)
             else:
                 emd_dist = _emdw(coords, wx, coords, wy)
@@ -84,8 +88,10 @@ def compute_similarity(
         zv_x = np.isnan(var_x) or var_x < eps
         zv_y = np.isnan(var_y) or var_y < eps
         if zv_x or zv_y:
-            if zv_x and zv_y and np.allclose(vx, vy):
-                return 1.0
+            if zv_x and zv_y and np.all(np.abs(vx - vy) < np.sqrt(eps)):
+                # Identical constant maps: perfect correlation. Fisher z uses
+                # the same clamp as non-constant identical maps below.
+                return float(np.arctanh(1 - eps)) if method == "fisherz" else 1.0
             warnings.warn(
                 f"Method {method} requires variance in both inputs. "
                 "One or both have near-zero variance."
@@ -97,7 +103,15 @@ def compute_similarity(
     elif method == "spearman":
         return float(spearmanr(vx, vy).statistic)
     elif method == "fisherz":
-        r = float(np.corrcoef(vx, vy)[0, 1])
+        # Identical maps have r = 1 exactly; corrcoef can return 1 - k * eps.
+        r = 1.0 if np.array_equal(vx, vy) else float(np.corrcoef(vx, vy)[0, 1])
+        # r within rounding error of +/-1 (e.g. a rescaled copy) counts as +/-1,
+        # so every perfect correlation maps to the same z.
+        snap = 64 * eps
+        if r > 1 - snap:
+            r = 1.0
+        if r < -1 + snap:
+            r = -1.0
         r = np.clip(r, -1 + eps, 1 - eps)
         return float(np.arctanh(r))
     elif method == "cosine":
@@ -108,6 +122,8 @@ def compute_similarity(
         d = _cosine_dist(vx, vy)
         return 1.0 - d
     elif method == "l1":
+        if np.any(vx < 0) or np.any(vy < 0):
+            warnings.warn("L1 distance interpretation assumes non-negative densities.")
         sx = vx.sum()
         sy = vy.sum()
         if sx <= eps or sy <= eps:
@@ -117,34 +133,166 @@ def compute_similarity(
         x2 = vy / sy
         return 1.0 - 0.5 * np.abs(x1 - x2).sum()
     elif method == "jaccard":
-        num = np.minimum(vx, vy).sum()
-        den = np.maximum(vx, vy).sum()
+        # Extended (Tanimoto) Jaccard, as proxy's "eJaccard" in R eyesim.
+        xy = float(np.dot(vx, vy))
+        den = float(np.dot(vx, vx) + np.dot(vy, vy) - xy)
         if den <= eps:
             return np.nan
-        return num / den
+        return xy / den
     elif method == "dcov":
-        from scipy.spatial.distance import pdist, squareform
         sx = vx.sum()
         sy = vy.sum()
         if sx <= eps or sy <= eps:
             warnings.warn("Cannot normalize for dcov; sum is too small.")
             return np.nan
-        x1 = vx / sx
-        x2 = vy / sy
-        # Simple distance correlation implementation
-        n = len(x1)
-        a = squareform(pdist(x1.reshape(-1, 1)))
-        b = squareform(pdist(x2.reshape(-1, 1)))
-        A = a - a.mean(axis=0, keepdims=True) - a.mean(axis=1, keepdims=True) + a.mean()
-        B = b - b.mean(axis=0, keepdims=True) - b.mean(axis=1, keepdims=True) + b.mean()
-        dcov_xy = np.sqrt(np.maximum((A * B).mean(), 0))
-        dcov_xx = np.sqrt(np.maximum((A * A).mean(), 0))
-        dcov_yy = np.sqrt(np.maximum((B * B).mean(), 0))
-        if dcov_xx * dcov_yy <= 0:
-            return 0.0
-        return dcov_xy / np.sqrt(dcov_xx * dcov_yy)
+        return _distance_correlation(vx / sx, vy / sy)
     else:
         raise ValueError(f"Unknown similarity method: {method}")
+
+
+def _pairwise_abs_row_sums(v: np.ndarray) -> np.ndarray:
+    """``sum_j |v_i - v_j|`` for every ``i`` in O(n log n)."""
+    n = len(v)
+    order = np.argsort(v, kind="mergesort")
+    sv = v[order]
+    csum = np.cumsum(sv)
+    total = csum[-1]
+    k = np.arange(n)
+    before = np.concatenate(([0.0], csum[:-1]))
+    sums_sorted = sv * k - before + (total - csum) - sv * (n - 1 - k)
+    out = np.empty(n)
+    out[order] = sums_sorted
+    return out
+
+
+def _sum_abs_products(x: np.ndarray, y: np.ndarray) -> float:
+    """``sum_{i,j} |x_i - x_j| |y_i - y_j|`` in O(n log n).
+
+    With rows sorted by ``x``, ``|x_j - x_i| = x_j - x_i`` for ``i < j`` and
+    ``|y_j - y_i| = (y_j - y_i) (2 [y_i < y_j] - 1)``. The unsigned part is a
+    prefix-sum identity; the indicator part is accumulated with Fenwick trees
+    keyed by the rank of ``y``.
+    """
+    n = len(x)
+    order = np.lexsort((y, x))
+    xs = x[order]
+    ys = y[order]
+    # sum_{i<j} (x_j - x_i)(y_j - y_i)
+    cx = np.concatenate(([0.0], np.cumsum(xs)[:-1]))
+    cy = np.concatenate(([0.0], np.cumsum(ys)[:-1]))
+    cxy = np.concatenate(([0.0], np.cumsum(xs * ys)[:-1]))
+    k = np.arange(n)
+    plain = float(np.sum(k * xs * ys - xs * cy - ys * cx + cxy))
+
+    # sum_{i<j, y_i<y_j} (x_j - x_i)(y_j - y_i), via Fenwick trees over y rank.
+    ranks = np.searchsorted(np.unique(ys), ys) + 1
+    size = int(ranks.max())
+    t_n = [0.0] * (size + 1)
+    t_x = [0.0] * (size + 1)
+    t_y = [0.0] * (size + 1)
+    t_xy = [0.0] * (size + 1)
+    below = 0.0
+    xs_l = xs.tolist()
+    ys_l = ys.tolist()
+    rk_l = ranks.tolist()
+    for j in range(n):
+        xj, yj, r = xs_l[j], ys_l[j], rk_l[j]
+        # query strictly smaller y ranks: prefix r - 1
+        cnt = sx = sy = sxy = 0.0
+        q = r - 1
+        while q > 0:
+            cnt += t_n[q]
+            sx += t_x[q]
+            sy += t_y[q]
+            sxy += t_xy[q]
+            q -= q & -q
+        below += cnt * xj * yj - xj * sy - yj * sx + sxy
+        q = r
+        while q <= size:
+            t_n[q] += 1.0
+            t_x[q] += xj
+            t_y[q] += yj
+            t_xy[q] += xj * yj
+            q += q & -q
+    # pairs with i<j: signed sum = 2*below - plain; both orders double it.
+    return 2.0 * (2.0 * below - plain)
+
+
+def _distance_correlation(x: np.ndarray, y: np.ndarray) -> float:
+    """Distance correlation (V-statistic) of two univariate samples.
+
+    Matches ``energy::dcor`` as computed by R eyesim (``sqrt`` of
+    ``energy::dcor2d(type = "V")`` on standardised values) in O(n log n) time,
+    so 100 x 100 maps do not need an n x n distance matrix.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    sdx = np.std(x, ddof=1)
+    sdy = np.std(y, ddof=1)
+    if not (np.isfinite(sdx) and np.isfinite(sdy)) or sdx <= 0 or sdy <= 0:
+        return np.nan
+    x = (x - x.mean()) / sdx
+    y = (y - y.mean()) / sdy
+    n = len(x)
+    ax =_pairwise_abs_row_sums(x)
+    by = _pairwise_abs_row_sums(y)
+    n2 = float(n) * n
+    n3 = n2 * n
+    n4 = n2 * n2
+
+    def v_stat(a_rows, b_rows, s_ab):
+        return s_ab / n2 - 2.0 * float(np.dot(a_rows, b_rows)) / n3 + a_rows.sum() * b_rows.sum() / n4
+
+    v_xy = v_stat(ax, by, _sum_abs_products(x, y))
+    v_xx = v_stat(ax, ax, _sum_abs_products(x, x))
+    v_yy = v_stat(by, by, _sum_abs_products(y, y))
+    if v_xx <= 0 or v_yy <= 0:
+        return 0.0
+    v = v_xy / np.sqrt(v_xx * v_yy)
+    return float(np.sqrt(max(v, 0.0)))
+
+
+class LatticeMismatchError(ValueError):
+    """Two density maps are not on the same grid (R class ``eyesim_lattice_mismatch``).
+
+    Density maps are compared cell by cell, so this is an input error rather
+    than a numerical failure of one comparison: callers that turn per-pair
+    errors into NaN (``repetitive_similarity``, multiscale aggregation) let it
+    propagate.
+    """
+
+
+def _all_equal(target, current, tolerance: float = 1.5e-8) -> bool:
+    """R ``isTRUE(all.equal(target, current))`` for numeric vectors."""
+    target = np.asarray(target, dtype=float).ravel()
+    current = np.asarray(current, dtype=float).ravel()
+    if target.shape != current.shape:
+        return False
+    if target.size == 0:
+        return True
+    xy = float(np.mean(np.abs(target - current)))
+    xn = float(np.mean(np.abs(target)))
+    if np.isfinite(xn) and xn > tolerance:
+        xy /= xn
+    return xy <= tolerance
+
+
+def _density_lattices_equal(x, y) -> bool:
+    gx, gy = np.asarray(x.x, dtype=float), np.asarray(x.y, dtype=float)
+    hx, hy = np.asarray(y.x, dtype=float), np.asarray(y.y, dtype=float)
+    return (
+        gx.size == hx.size and gy.size == hy.size
+        and _all_equal(gx, hx) and _all_equal(gy, hy)
+        and np.shape(x.z) == np.shape(y.z)
+    )
+
+
+def _check_same_density_lattice(x, y) -> None:
+    if not _density_lattices_equal(x, y):
+        raise LatticeMismatchError(
+            "similarity(): density maps are on different lattices. Both maps must "
+            "have the same x and y grid coordinates (same bounds and outdim)."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +322,10 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
         sx_map = {s.sigma: s for s in x}
         sy_map = {s.sigma: s for s in y}
+        # Mismatched lattices are an input error, not a per-scale numerical
+        # failure, so check them before the per-scale handler below.
+        for sig in common:
+            _check_same_density_lattice(sx_map[sig], sy_map[sig])
         per_scale = []
         for sig in common:
             try:
@@ -195,6 +347,13 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
     # EyeDensity
     if isinstance(x, EyeDensity):
+        if isinstance(y, EyeDensity):
+            _check_same_density_lattice(x, y)
+        elif y is not None and np.size(y) != np.size(x.z):
+            raise ValueError(
+                f"similarity(): `y` has {np.size(y)} values but the density map `x` "
+                f"has {np.size(x.z)} grid cells."
+            )
         return compute_similarity(x, y, method=method, saliency_map=saliency_map)
 
     # Scanpath (must check before FixationGroup since Scanpath inherits from it)
@@ -227,16 +386,38 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
                 return np.nan
         if method == "overlap":
             from peyesim.overlap import fixation_overlap
-            time_samples = kwargs.pop("time_samples", None)
-            result = fixation_overlap(x, y, time_samples=time_samples, **kwargs)
+            time_samples = kwargs.get("time_samples")
+            if time_samples is None:
+                raise ValueError("method `overlap` requires a vector of `time_samples`")
+            result = fixation_overlap(x, y, dthresh=kwargs.get("dthresh", 60),
+                                      time_samples=time_samples)
             return result["perc"]
         elif method == "sinkhorn":
-            coords_x = x[["x", "y"]].values
-            coords_y = y[["x", "y"]].values
-            wx = np.ones(len(x)) / len(x)
-            wy = np.ones(len(y)) / len(y)
-            dist = _emdw(coords_x, wx, coords_y, wy)
+            # As R eyesim: an entropic OT distance between the fixations in
+            # (x / xdenom, y / ydenom, onset / tdenom * tweight) space, with
+            # duration weights.
+            xdenom = kwargs.get("xdenom", 1000)
+            ydenom = kwargs.get("ydenom", 1000)
+            tdenom = kwargs.get("tdenom", 3000)
+            tweight = kwargs.get("tweight", 0.8)
+            lam = kwargs.get("lambda_", kwargs.get("lambda", 0.1))
+
+            def _xyt(fg):
+                return np.column_stack([
+                    np.asarray(fg["x"], dtype=float) / xdenom,
+                    np.asarray(fg["y"], dtype=float) / ydenom,
+                    np.asarray(fg["onset"], dtype=float) / tdenom * tweight,
+                ])
+
+            from scipy.spatial.distance import cdist
+
+            d = cdist(_xyt(x), _xyt(y))
+            xdur = np.asarray(x["duration"], dtype=float)
+            ydur = np.asarray(y["duration"], dtype=float)
+            dist = sinkhorn_distance(d, xdur / xdur.sum(), ydur / ydur.sum(), lam=lam)
             return 1.0 / (1.0 + dist)
+        else:
+            raise ValueError("method for fixation groups must be one of {'sinkhorn', 'overlap'}")
 
     # Default: numeric vectors
     return compute_similarity(x, y, method=method, saliency_map=saliency_map)
@@ -271,42 +452,61 @@ def sample_density(
     if normalize not in valid_norms:
         raise ValueError(f"'arg' should be one of {valid_norms}")
 
-    def nearest_index(coord, grid):
-        idx = np.interp(coord, grid, np.arange(len(grid)))
-        idx = np.clip(np.round(idx).astype(int), 0, len(grid) - 1)
-        return idx
+    zmat = _normalize_density_values(dens.z, normalize)
+    if times is None:
+        z_vals = _lookup_density(zmat, dens.x, dens.y, fix["x"], fix["y"])
+        return pd.DataFrame({"z": z_vals, "time": np.asarray(fix["onset"])})
+    times = np.asarray(times, dtype=float)
+    fg_sampled = fix.sample_fixations(times)
+    z_vals = _lookup_density(zmat, dens.x, dens.y, fg_sampled["x"], fg_sampled["y"])
+    return pd.DataFrame({"z": z_vals, "time": times})
 
-    zmat = dens.z.copy()
+
+def _normalize_density_values(zmat, normalize: str) -> np.ndarray:
+    """Normalise a density matrix as described in :func:`sample_density`."""
+    zmat = np.array(zmat, dtype=float, copy=True)
     if normalize == "max":
-        mx = zmat.max()
+        mx = np.nanmax(zmat)
         if mx > 0:
             zmat = zmat / mx
     elif normalize == "sum":
-        s = zmat.sum()
-        if s > 0:
-            zmat = zmat / s
+        total = np.nansum(zmat)
+        if total > 0:
+            zmat = zmat / total
     elif normalize == "zscore":
-        mu = zmat.mean()
-        sd = zmat.ravel().std(ddof=1)
+        mu = np.nanmean(zmat)
+        sd = np.nanstd(zmat.ravel(), ddof=1)
         if sd > 0:
             zmat = (zmat - mu) / sd
+    return zmat
 
-    if times is None:
-        xs = fix["x"].values
-        ys = fix["y"].values
-        ix = nearest_index(xs, dens.x)
-        iy = nearest_index(ys, dens.y)
-        z_vals = zmat[ix, iy]
-        return pd.DataFrame({"z": z_vals, "time": fix["onset"].values})
-    else:
-        times = np.asarray(times, dtype=float)
-        fg_sampled = fix.sample_fixations(times)
-        xs = fg_sampled["x"].values
-        ys = fg_sampled["y"].values
-        ix = nearest_index(xs, dens.x)
-        iy = nearest_index(ys, dens.y)
-        z_vals = zmat[ix, iy]
-        return pd.DataFrame({"z": z_vals, "time": times})
+
+def _nearest_grid_index(coord, grid) -> np.ndarray:
+    """Nearest lattice index (0-based), clamped to the grid; -1 for missing.
+
+    Like R's ``round(approx(grid, seq_along(grid), coord, rule = 2)$y)``: an
+    exact midpoint rounds half to even on the 1-based index scale (on the grid
+    0, 25, 50, 75, 100 both 12.5 and 37.5 map to 25).
+    """
+    coord = np.asarray(coord, dtype=float)
+    grid = np.asarray(grid, dtype=float)
+    idx = np.full(coord.shape, -1, dtype=int)
+    ok = np.isfinite(coord)
+    if ok.any():
+        # Round on R's 1-based index scale: half-to-even depends on the base
+        # (1-based 2.5 -> 2, whereas 0-based 1.5 -> 2 would pick the next cell).
+        pos = np.interp(coord[ok], grid, np.arange(1, len(grid) + 1, dtype=float))
+        idx[ok] = np.clip(np.round(pos).astype(int), 1, len(grid)) - 1
+    return idx
+
+
+def _lookup_density(zmat, grid_x, grid_y, xs, ys) -> np.ndarray:
+    ix = _nearest_grid_index(xs, grid_x)
+    iy = _nearest_grid_index(ys, grid_y)
+    out = np.full(ix.shape, np.nan)
+    ok = (ix >= 0) & (iy >= 0)
+    out[ok] = zmat[ix[ok], iy[ok]]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -376,25 +576,20 @@ def sample_density_time(
             if pg_str not in match_split:
                 match_split[pg_str] = []
             match_split[pg_str].append(matchind[i])
-        # Deduplicate
+        # Deduplicate, keeping first-appearance order
         for k in match_split:
-            match_split[k] = list(set(match_split[k]))
+            match_split[k] = list(dict.fromkeys(match_split[k]))
 
     # Helper: bin aggregation
     def _aggregate_bins(sampled_df, time_bins, agg_fun):
         if sampled_df is None or len(sampled_df) == 0:
             return [np.nan] * (len(time_bins) - 1)
+        # Every bin is half-open, [lower, upper), including the last one, so a
+        # time equal to the final break falls outside all bins.
         bin_labels = np.digitize(sampled_df["time"].values, time_bins, right=False)
-        # digitize: bin 1 means [time_bins[0], time_bins[1]), etc.
         results = []
         for b in range(1, len(time_bins)):
             vals = sampled_df["z"].values[bin_labels == b]
-            # Also include values at the last boundary if include.lowest
-            if b == len(time_bins) - 1:
-                vals_last = sampled_df["z"].values[
-                    sampled_df["time"].values == time_bins[-1]
-                ]
-                vals = np.concatenate([vals, vals_last])
             vals = vals[~np.isnan(vals)] if len(vals) > 0 else vals
             if len(vals) == 0:
                 results.append(np.nan)
@@ -436,10 +631,12 @@ def sample_density_time(
                 perm_key = str(source_tab[permute_on].iloc[i])
                 mind = list(match_split.get(perm_key, []))
             else:
-                mind = list(set(matchind))
+                mind = list(matchind)
 
+            # Remove every copy of the current match and keep each other
+            # template once, as in template_similarity()
             current_match = mi
-            mind = [m for m in mind if m != current_match]
+            mind = list(dict.fromkeys(m for m in mind if m != current_match))
 
             if len(mind) == 0:
                 perm_sampled = pd.DataFrame({"z": np.full(len(times), np.nan), "time": times})
@@ -512,9 +709,16 @@ def _run_similarity_analysis(
     sourcevar: str,
     window=None,
     multiscale_aggregation: str = "mean",
+    rng: np.random.Generator | None = None,
     **kwargs,
 ) -> pd.DataFrame:
-    """Core similarity analysis loop (mirrors R ``run_similarity_analysis``)."""
+    """Core similarity analysis loop (mirrors R ``run_similarity_analysis``).
+
+    Permutation candidates for a row are the distinct reference rows matched by
+    at least one source row (within the row's ``permute_on`` stratum, if
+    given), with every copy of the row's own match removed before sampling.
+    ``rng`` draws the subsets; ``None`` uses NumPy's global random state.
+    """
 
     def mean_or_nan(values) -> float:
         arr = np.asarray(values, dtype=float)
@@ -542,6 +746,12 @@ def _run_similarity_analysis(
     eye_sim_list = []
     perm_sim_list = []
     diff_list = []
+    n_perm_list = []
+
+    def _sample(candidates, size):
+        if rng is None:
+            return list(np.random.choice(candidates, size, replace=False))
+        return list(rng.choice(candidates, size, replace=False))
 
     ref_data = ref_tab[refvar].values
     src_data = source_tab[sourcevar].values
@@ -554,10 +764,15 @@ def _run_similarity_analysis(
         d2 = src_data[i]
 
         if d1 is None or d2 is None:
+            warnings.warn(
+                "Invalid or NULL similarity input encountered in run_similarity_analysis(). "
+                "Returning NA for this comparison."
+            )
             eye_sim_list.append(np.nan if not is_dict_method else None)
             if permutations > 0:
                 perm_sim_list.append(np.nan if not is_dict_method else None)
                 diff_list.append(np.nan if not is_dict_method else None)
+                n_perm_list.append(0)
             continue
 
         sim = similarity(d1, d2, method=method,
@@ -569,20 +784,21 @@ def _run_similarity_analysis(
                 pkey = str(source_tab[permute_on].iloc[i])
                 mind = list(match_split.get(pkey, []))
             else:
-                mind = list(set(matchind))
+                mind = list(matchind)
 
+            # Remove every copy of the true match first (several source rows
+            # can share a key), keep each other template once, then sample
+            # from the distinct non-matching candidates only.
+            mind = list(dict.fromkeys(m for m in mind if m != mi))
             if permutations < len(mind):
-                mind = list(np.random.choice(mind, permutations, replace=False))
-
-            # Match R: sample from the candidate stratum first, then remove the
-            # matched template only if it was sampled.
-            mind = [m for m in mind if m != mi]
+                mind = _sample(mind, permutations)
 
             if len(mind) == 0:
                 warnings.warn("no matching candidate indices for permutation test. Skipping.")
                 eye_sim_list.append(sim)
                 perm_sim_list.append(np.nan if not is_dict_method else None)
                 diff_list.append(np.nan if not is_dict_method else None)
+                n_perm_list.append(0)
                 continue
 
             psims = []
@@ -608,6 +824,7 @@ def _run_similarity_analysis(
 
             eye_sim_list.append(sim)
             perm_sim_list.append(perm_mean)
+            n_perm_list.append(len(mind))
 
             if is_dict_method:
                 if isinstance(sim, dict) and isinstance(perm_mean, dict):
@@ -642,11 +859,13 @@ def _run_similarity_analysis(
                     result[f"{k}_diff"] = [
                         s[k] if isinstance(s, dict) else np.nan for s in diff_list
                     ]
+                result["n_perm"] = n_perm_list
     else:
         result["eye_sim"] = eye_sim_list
         if permutations > 0:
             result["perm_sim"] = perm_sim_list
             result["eye_sim_diff"] = diff_list
+            result["n_perm"] = n_perm_list
 
     return result
 
@@ -862,7 +1081,9 @@ def template_similarity_cv(
     n_folds : int, optional
         Number of CV folds (default ``min(5, n_groups)``).
     seed : int
-        Random seed for fold assignment.
+        Random seed for fold assignment and for the permutation draws that
+        follow it, so results are reproducible from ``seed`` alone. NumPy's
+        global random state is neither used nor changed.
     fit_source_filter : callable or array-like of bool, optional
         Boolean mask or callable ``(source_tab) -> bool array`` selecting
         rows eligible for the **training** set of the transform fit.
@@ -914,6 +1135,9 @@ def template_similarity_cv(
     fold_ids = cv["fold_ids"]
     n_folds_actual = cv["n_folds"]
 
+    # Permutation controls are drawn only from the reference rows matched by
+    # the same held-out fold, with a generator seeded from ``seed``.
+    perm_rng = np.random.default_rng(seed)
     fold_results = []
 
     for fold in range(1, n_folds_actual + 1):
@@ -997,6 +1221,7 @@ def template_similarity_cv(
             fold_refvar,
             fold_sourcevar,
             multiscale_aggregation=multiscale_aggregation,
+            rng=perm_rng,
             **kwargs,
         )
         fold_res[".cv_fold"] = fold

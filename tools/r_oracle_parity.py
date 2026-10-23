@@ -49,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 R_CODE = r"""
-suppressPackageStartupMessages(pkgload::load_all("eyesim", quiet = TRUE))
+suppressPackageStartupMessages(pkgload::load_all(Sys.getenv("EYESIM_SOURCE_DIR", "eyesim"), quiet = TRUE))
 suppressPackageStartupMessages(library(jsonlite))
 
 fg <- fixation_group(

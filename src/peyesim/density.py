@@ -95,6 +95,22 @@ class EyeDensityMultiscale:
 # Core KDE
 # ---------------------------------------------------------------------------
 
+def _ks_support_mask(points: np.ndarray, grid: np.ndarray, half_width: float) -> np.ndarray:
+    """Grid points that ``ks::kde()`` evaluates for each data point (one axis).
+
+    ks (``kde.grid.2d``) only adds a point's kernel on the grid points from the
+    last one at or below ``point - half_width`` (at least the first) up to the
+    last one at or below ``point + half_width`` (at least the first), where
+    ``half_width = supp * sigma``. Returns a ``(len(grid), len(points))`` mask.
+    """
+    lo = np.sum((points - half_width)[None, :] >= grid[:, None], axis=0)
+    hi = np.sum((points + half_width)[None, :] >= grid[:, None], axis=0)
+    lo = np.maximum(lo, 1)
+    hi = np.maximum(hi, 1)
+    idx = np.arange(1, len(grid) + 1)[:, None]
+    return (idx >= lo[None, :]) & (idx <= hi[None, :])
+
+
 def _kde2d_weighted(
     x_data: np.ndarray,
     y_data: np.ndarray,
@@ -103,11 +119,14 @@ def _kde2d_weighted(
     xbounds: tuple[float, float],
     ybounds: tuple[float, float],
     outdim: tuple[int, int],
+    supp: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Weighted 2-D Gaussian KDE on a regular grid.
 
-    This follows the continuous-kernel formula used by the R package's default
-    ``ks::kde`` path: ``sigma`` is the Gaussian bandwidth in coordinate units.
+    ``sigma`` is the Gaussian kernel standard deviation in coordinate units.
+    With ``supp=None`` the full kernel is evaluated (``MASS::kde2d``); with a
+    number, each kernel is truncated to ``supp`` standard deviations the way
+    the exact (unbinned) ``ks::kde()`` grid estimator does.
     """
     gx = np.linspace(xbounds[0], xbounds[1], outdim[0])
     gy = np.linspace(ybounds[0], ybounds[1], outdim[1])
@@ -132,9 +151,32 @@ def _kde2d_weighted(
     ay = (gy[:, None] - y_data[None, :]) / hy
     kx = norm * np.exp(-0.5 * ax ** 2)
     ky = norm * np.exp(-0.5 * ay ** 2)
+    if supp is not None:
+        kx = np.where(_ks_support_mask(x_data, gx, supp * hx), kx, 0.0)
+        ky = np.where(_ks_support_mask(y_data, gy, supp * hy), ky, 0.0)
+    # Weights apply per fixation (columns of the kernel matrices).
     z = (kx * weights[None, :]) @ ky.T / (total_weight * hx * hy)
 
     return gx, gy, z
+
+
+def _zapsmall(z: np.ndarray, digits: int = 7) -> np.ndarray:
+    """R's ``zapsmall(z, digits)`` as implemented in R 4.5.
+
+    R rounds to ``max(0, digits - log10(max|z|))`` decimal places, and
+    ``round()`` itself rounds a fractional ``digits`` to the nearest integer
+    (``floor(d + 0.5)``). Values below about ``max|z| * 5e-8`` become zero.
+    """
+    z = np.asarray(z, dtype=float)
+    finite = ~np.isnan(z)
+    if not finite.any():
+        return z
+    mx = float(np.max(np.abs(z[finite])))
+    if mx > 0:
+        dig = max(0.0, digits - np.log10(mx))
+    else:
+        dig = float(digits)
+    return np.round(z, int(np.floor(dig + 0.5)))
 
 
 def _compute_single_eye_density(
@@ -144,15 +186,22 @@ def _compute_single_eye_density(
     ybounds: tuple[float, float],
     outdim: tuple[int, int],
     normalize: bool,
-    duration_weighted: bool,
+    weighted: bool,
     weights: np.ndarray,
+    kde_pkg: str = "ks",
+    supp: float = 3.7,
 ) -> EyeDensity | None:
     """Compute a single-scale density map."""
-    x_data = fg["x"].to_numpy()
-    y_data = fg["y"].to_numpy()
+    x_data = fg["x"].to_numpy(dtype=float)
+    y_data = fg["y"].to_numpy(dtype=float)
+    final_weights = weights if weighted else np.ones(len(x_data))
 
-    gx, gy, z = _kde2d_weighted(x_data, y_data, weights, sigma_val,
-                                 xbounds, ybounds, outdim)
+    # ks::kde uses sigma as the kernel SD; MASS::kde2d treats it as a bandwidth
+    # h whose kernel SD is h / 4.
+    kernel_sd = sigma_val if kde_pkg == "ks" else sigma_val / 4.0
+    gx, gy, z = _kde2d_weighted(x_data, y_data, final_weights, kernel_sd,
+                                 xbounds, ybounds, outdim,
+                                 supp=supp if kde_pkg == "ks" else None)
 
     if normalize:
         s = z.sum()
@@ -161,9 +210,58 @@ def _compute_single_eye_density(
         else:
             warnings.warn(f"Sum of density matrix is near zero, cannot normalize. Sigma: {sigma_val}")
 
-    z = np.around(z, decimals=15)  # zapsmall equivalent
+    # Fixed precision so results match R's zapsmall(z, digits = 7).
+    z = _zapsmall(z, digits=7)
 
     return EyeDensity(x=gx, y=gy, z=z, sigma=sigma_val, fixgroup=fg)
+
+
+# Arguments of ks::kde() that eye_density() sets itself.
+_KS_MANAGED_ARGS = {"x", "H", "h", "gridsize", "xmin", "xmax", "w", "eval.points"}
+# Other ks::kde() arguments.
+_KS_OTHER_ARGS = {
+    "gridtype", "supp", "binned", "bgridsize", "positive", "adj.positive",
+    "compute.cont", "approx.cont", "unit.interval", "density", "verbose",
+}
+# ks::kde() arguments that do not change the estimate on eye_density()'s grid
+# (contour computation, progress output, binning-only settings).
+_KS_NO_EFFECT_ARGS = {"compute.cont", "approx.cont", "verbose", "bgridsize"}
+
+
+def _check_kde_args(kde_args: dict, kde_pkg: str) -> None:
+    """Validate extra ``ks::kde()`` arguments the way R's eye_density() does."""
+    if not kde_args:
+        return
+    if kde_pkg == "MASS":
+        raise ValueError(
+            "Additional arguments are passed to ks::kde() and are not supported "
+            'when kde_pkg = "MASS".'
+        )
+    names = {k.replace("_", ".") for k in kde_args}
+    bad = sorted(n for n in names if n in _KS_MANAGED_ARGS or n not in _KS_OTHER_ARGS)
+    if bad:
+        raise ValueError(
+            f"Unsupported ks::kde() argument(s): {', '.join(bad)}. eye_density() sets "
+            "x, H, gridsize, xmin, xmax, w, and eval.points itself."
+        )
+    for key, value in kde_args.items():
+        name = key.replace("_", ".")
+        if name == "supp":
+            if not (np.isscalar(value) and np.isfinite(value) and value > 0):
+                raise ValueError("supp must be a single positive number.")
+            continue
+        if name in _KS_NO_EFFECT_ARGS:
+            continue
+        if name == "binned" and not value:
+            continue
+        if name == "positive" and not value:
+            continue
+        if name in {"unit.interval", "density"} and not value:
+            continue
+        raise NotImplementedError(
+            f"ks::kde() argument {name}={value!r} is not implemented by peyesim's native "
+            "KDE, which evaluates the exact (unbinned) Gaussian kernel estimate."
+        )
 
 
 def eye_density(
@@ -178,18 +276,67 @@ def eye_density(
     min_fixations: int = 2,
     origin: tuple[float, float] = (0, 0),
     weights: np.ndarray | None = None,
-    kde_pkg: str | None = None,
+    kde_pkg: str | None = "ks",
+    **kde_args,
 ) -> EyeDensity | EyeDensityMultiscale | None:
     """Compute a density map for a :class:`FixationGroup`.
 
     Parameters mirror the R ``eye_density.fixation_group`` method.
-    """
-    if kde_pkg not in (None, "scipy", "ks"):
-        raise ValueError("kde_pkg must be one of None, 'scipy', or 'ks'")
 
-    sigma_arr = np.atleast_1d(np.asarray(sigma, dtype=float))
-    if np.any(sigma_arr <= 0):
-        raise ValueError("sigma must be a positive numeric value or vector")
+    ``sigma`` is the standard deviation of the isotropic Gaussian kernel under
+    ``kde_pkg="ks"`` (default). Under ``kde_pkg="MASS"`` it is the bandwidth
+    ``h`` of ``MASS::kde2d``, whose kernel standard deviation is ``h / 4``; use
+    ``4 * sigma`` under MASS to approximate the ks map.
+
+    ``weights`` are optional non-negative per-fixation weights, one per row of
+    ``fg`` (before ``window`` filtering); they take precedence over
+    ``duration_weighted``. If the weights of the fixations used sum to zero, a
+    warning is raised and ``None`` returned.
+
+    Extra keyword arguments are ``ks::kde()`` arguments (R-style dotted names
+    may be passed as ``**{"compute.cont": False}`` or with underscores). The
+    arguments eye_density() sets itself (``x``, ``H``, ``h``, ``gridsize``,
+    ``xmin``, ``xmax``, ``w``, ``eval.points``) and unknown names are errors,
+    and any extra argument is an error under ``kde_pkg="MASS"``. peyesim
+    evaluates the exact grid estimate of ``ks::kde()`` with ``binned=FALSE``
+    (the ks default for up to 500 fixations), including its truncation of each
+    kernel at ``supp`` (default 3.7) standard deviations; ``supp`` may be set.
+    ``binned=True`` (the ks default above 500 fixations) and other settings that
+    change the estimate raise ``NotImplementedError``. ``kde_pkg="MASS"``
+    evaluates the untruncated kernel, as ``MASS::kde2d`` does.
+
+    After optional normalization, each map is rounded like R's
+    ``zapsmall(z, digits = 7)``: to 7 significant digits relative to the map
+    maximum, so values below roughly ``max(z) * 5e-8`` become zero.
+    """
+    if kde_pkg is None:
+        kde_pkg = "ks"
+    elif kde_pkg == "scipy":
+        warnings.warn('kde_pkg="scipy" is deprecated; use "ks".', DeprecationWarning, stacklevel=2)
+        kde_pkg = "ks"
+    if not isinstance(kde_pkg, str) or kde_pkg not in ("ks", "MASS"):
+        raise ValueError('kde_pkg must be "ks" or "MASS".')
+    _check_kde_args(kde_args, kde_pkg)
+    supp = float(kde_args.get("supp", 3.7))
+
+    try:
+        sigma_arr = np.atleast_1d(np.asarray(sigma, dtype=float)).ravel()
+    except (TypeError, ValueError):
+        sigma_arr = np.array([np.nan])
+    if sigma_arr.size == 0 or not np.all(np.isfinite(sigma_arr) & (sigma_arr > 0)):
+        raise ValueError("sigma must be a positive, finite numeric value or vector")
+
+    n_rows = len(fg)
+    if weights is not None:
+        w_all = np.asarray(weights, dtype=float).ravel()
+        if w_all.shape[0] != n_rows:
+            raise ValueError("weights must be a numeric vector with one value per fixation.")
+        if not np.all(np.isfinite(w_all)) or np.any(w_all < 0):
+            raise ValueError("weights must be finite and non-negative.")
+        if not np.any(w_all > 0):
+            raise ValueError("weights must not all be zero.")
+    else:
+        w_all = None
 
     if xbounds is None:
         xbounds = (fg["x"].min(), fg["x"].max())
@@ -203,10 +350,10 @@ def eye_density(
             raise ValueError("Window must be length 2")
         if window[1] <= window[0]:
             raise ValueError("window[1] must be > window[0]")
-        fg_filtered = fg[
-            (fg["onset"] >= window[0]) & (fg["onset"] < window[1])
-        ].reset_index(drop=True)
-        fg_filtered = FixationGroup(fg_filtered)
+        keep = ((fg["onset"] >= window[0]) & (fg["onset"] < window[1])).to_numpy()
+        if w_all is not None:
+            w_all = w_all[keep]
+        fg_filtered = FixationGroup(fg.to_pandas(copy=False).loc[keep].reset_index(drop=True))
         if len(fg_filtered) == 0:
             warnings.warn("No fixations remain after applying the window filter. Returning None.")
             return None
@@ -218,20 +365,29 @@ def eye_density(
         )
         return None
 
-    # Weights
-    if weights is not None:
-        w = np.asarray(weights, dtype=float)
+    # Weights: explicit weights take precedence over duration weighting.
+    weighted = w_all is not None or duration_weighted
+    if w_all is not None:
+        w = w_all
     elif duration_weighted:
+        if "duration" not in fg_filtered:
+            raise ValueError("The data frame must contain a 'duration' column.")
         w = fg_filtered["duration"].to_numpy(dtype=float)
+        if np.any(w < 0):
+            raise ValueError("All durations must be non-negative.")
     else:
         w = np.ones(len(fg_filtered))
+
+    if weighted and w.sum() <= 0:
+        warnings.warn("Sum of weights is zero among the fixations used. Returning None.")
+        return None
 
     if len(sigma_arr) > 1:
         # Multiscale
         densities = []
         for s in sigma_arr:
             d = _compute_single_eye_density(fg_filtered, s, xbounds, ybounds,
-                                            outdim, normalize, duration_weighted, w)
+                                            outdim, normalize, weighted, w, kde_pkg, supp)
             if d is not None:
                 densities.append(d)
         if len(densities) == 0:
@@ -241,7 +397,7 @@ def eye_density(
     else:
         return _compute_single_eye_density(
             fg_filtered, sigma_arr[0], xbounds, ybounds,
-            outdim, normalize, duration_weighted, w
+            outdim, normalize, weighted, w, kde_pkg, supp
         )
 
 
@@ -358,7 +514,11 @@ def suggest_sigma(
     xbounds: tuple[float, float] | None = None,
     ybounds: tuple[float, float] | None = None,
 ) -> float:
-    """Suggest a kernel bandwidth using a 2-D Silverman rule."""
+    """Suggest a kernel bandwidth using a 2-D Silverman rule.
+
+    Returns ``nan`` when there are fewer than two fixations or, without display
+    bounds to clamp against, when the fixations have no spread.
+    """
     if isinstance(x, FixationGroup):
         xvals = x["x"].to_numpy()
         yvals = x["y"].to_numpy()
@@ -386,4 +546,9 @@ def suggest_sigma(
         sigma = max(sigma, display_scale * 0.01)
         sigma = min(sigma, display_scale * 0.15)
 
-    return sigma
+    # Without bounds to clamp against, coincident fixations give a zero spread,
+    # which is not a usable bandwidth.
+    if not np.isfinite(sigma) or sigma <= 0:
+        return np.nan
+
+    return float(sigma)

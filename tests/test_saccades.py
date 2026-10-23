@@ -14,7 +14,8 @@ def test_cart2pol_and_calcangle_match_r_contracts():
     np.testing.assert_allclose(polar[:, 1], [np.arctan2(4, 3), np.pi / 2])
 
     assert calcangle([1, 0], [0, 1]) == pytest.approx(90.0)
-    assert calcangle([1, 1], [1, 1]) == pytest.approx(0.0)
+    # R clamps the cosine but does not snap near-parallel angles to 0.
+    assert calcangle([1, 1], [1, 1]) == pytest.approx(0.0, abs=1e-5)
 
 
 def test_add_scanpath_builds_per_row():

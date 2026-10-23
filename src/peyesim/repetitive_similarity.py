@@ -8,7 +8,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
-from peyesim.similarity import similarity
+from peyesim.similarity import LatticeMismatchError, similarity
 
 
 def repetitive_similarity(
@@ -48,6 +48,10 @@ def repetitive_similarity(
                 val = similarity(d1, d2, method=method,
                                  multiscale_aggregation=multiscale_aggregation,
                                  **kwargs)
+            except LatticeMismatchError:
+                # Maps on different lattices are an input error, not a
+                # numerical failure of one pair: refuse the whole call.
+                raise
             except Exception as e:
                 warnings.warn(f"Error in similarity calculation for row {i} vs {j}: {e}")
                 val = np.nan

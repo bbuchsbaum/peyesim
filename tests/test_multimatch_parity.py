@@ -32,7 +32,7 @@ def test_multi_match_matches_r_reference_on_simple_fixture():
         "mm_length": 0.986968420655,
         "mm_position": 0.98,
         "mm_duration": 0.952380952381,
-        "mm_position_emd": 0.976803995716,
+        "mm_position_emd": 0.975554121145,  # all fixations, duration-weighted (eyesim >= 0.3.0)
     }
     for key, value in expected.items():
         tol = 1e-8 if key == "mm_position_emd" else 1e-12
@@ -118,7 +118,7 @@ def test_multi_match_direction_scale_invariance_matches_r_reference():
         "mm_length": 0.974221822095,
         "mm_position": 0.955106773506,
         "mm_duration": 1.0,
-        "mm_position_emd": 0.963037643433,
+        "mm_position_emd": 0.964200973511,  # all fixations, duration-weighted (eyesim >= 0.3.0)
     }
     for key, value in expected.items():
         tol = 1e-8 if key == "mm_position_emd" else 1e-9
