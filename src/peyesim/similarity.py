@@ -390,7 +390,8 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
             if time_samples is None:
                 raise ValueError("method `overlap` requires a vector of `time_samples`")
             result = fixation_overlap(x, y, dthresh=kwargs.get("dthresh", 60),
-                                      time_samples=time_samples)
+                                      time_samples=time_samples,
+                                      dist_method=kwargs.get("dist_method", "euclidean"))
             return result["perc"]
         elif method == "sinkhorn":
             # As R eyesim: an entropic OT distance between the fixations in

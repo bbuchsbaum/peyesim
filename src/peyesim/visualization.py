@@ -440,7 +440,8 @@ def plot_eye_density(
 
 def _onset_order(df, window):
     """Number fixations by onset over the whole sequence, then window and sort."""
-    df = df.copy()
+    # A fixation without an onset has no place in the sequence; drop it.
+    df = df.loc[df["onset"].notna()].copy()
     df["index"] = df["onset"].rank(method="first").astype(int)
     if window is not None:
         if len(window) != 2 or window[1] <= window[0]:

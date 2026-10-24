@@ -379,3 +379,19 @@ def test_r_parity_legend_number_formats(r_viz):
     assert format_density([0, 1.234e-4, 5e-5]) == r_viz["fmt_small"]
     assert format_density([0, 0.25, 1.5]) == r_viz["fmt_big"]
     assert format_limit([1.2345e-4]) + format_limit([0.123456]) == r_viz["fmt_limit"]
+
+
+def test_plot_fixation_group_skips_missing_onsets():
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from peyesim import fixation_group, plot_fixation_group
+
+    fg = fixation_group(x=[10, 20, 30], y=[10, 25, 15], onset=[0, np.nan, 200], duration=[100, 100, 100])
+    ax = plot_fixation_group(fg)
+    assert ax is not None
+    ax = plot_fixation_group(fg, window=(0, 150))
+    assert ax is not None
+    plt.close("all")

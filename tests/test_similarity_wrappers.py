@@ -303,3 +303,14 @@ def test_fixation_similarity_overlap_identical_returns_one():
     assert "eye_sim" in result.columns
     # Identical data compared to itself must yield perfect overlap
     assert all(result["eye_sim"] == 1.0)
+
+
+def test_similarity_overlap_forwards_dist_method():
+    from peyesim import fixation_group, similarity
+
+    a = fixation_group(x=[0.0], y=[0.0], onset=[0.0], duration=[100.0])
+    b = fixation_group(x=[40.0], y=[40.0], onset=[0.0], duration=[100.0])
+    times = np.array([0.0, 50.0])
+    # Euclidean distance 56.6 < 60 overlaps; Manhattan distance 80 does not.
+    assert similarity(a, b, method="overlap", time_samples=times) == 1.0
+    assert similarity(a, b, method="overlap", time_samples=times, dist_method="manhattan") == 0.0
