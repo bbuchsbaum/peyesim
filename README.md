@@ -1,7 +1,7 @@
 # peyesim
 
 [Documentation](https://bbuchsbaum.github.io/peyesim/) ·
-[API reference](https://bbuchsbaum.github.io/peyesim/reference/) ·
+[API reference](https://bbuchsbaum.github.io/peyesim/reference) ·
 [Source](https://github.com/bbuchsbaum/peyesim)
 
 Python port of the R [eyesim](https://github.com/bbuchsbaum/eyesim) package for analyzing eye-movement data.
@@ -49,12 +49,13 @@ similarity(ed1, ed2, method="pearson")
 The rendered documentation site is available at
 [bbuchsbaum.github.io/peyesim](https://bbuchsbaum.github.io/peyesim/).
 
-- [Get started](https://bbuchsbaum.github.io/peyesim/get-started.html) — fixations, density maps, and a first similarity score
-- [Comparing Eye-Movement Patterns](https://bbuchsbaum.github.io/peyesim/tutorials/overview.html) — template similarity and multiscale analysis
-- [Comparing Scanpaths with MultiMatch](https://bbuchsbaum.github.io/peyesim/tutorials/multimatch.html) — scanpath comparison across six dimensions
-- [Measuring Similarity Across Repeated Viewings](https://bbuchsbaum.github.io/peyesim/tutorials/repetitive-similarity.html) — within- vs. cross-stimulus similarity
-- [Latent Transforms for Template Similarity](https://bbuchsbaum.github.io/peyesim/tutorials/latent-transforms.html) — PCA, CORAL, CCA, and geometric alignment
-- [API reference](https://bbuchsbaum.github.io/peyesim/reference/) — public functions and data structures
+- [Get started](https://bbuchsbaum.github.io/peyesim/get-started) — fixations, density maps, and a first similarity score
+- [Comparing Eye-Movement Patterns](https://bbuchsbaum.github.io/peyesim/tutorials/overview) — template similarity and multiscale analysis
+- [Comparing Scanpaths with MultiMatch](https://bbuchsbaum.github.io/peyesim/tutorials/multimatch) — scanpath comparison across six dimensions
+- [Measuring Similarity Across Repeated Viewings](https://bbuchsbaum.github.io/peyesim/tutorials/repetitive-similarity) — within- vs. cross-stimulus similarity
+- [Latent Transforms for Template Similarity](https://bbuchsbaum.github.io/peyesim/tutorials/latent-transforms) — PCA, CORAL, CCA, and geometric alignment
+- [Revisitation](https://bbuchsbaum.github.io/peyesim/tutorials/revisitation) — returns to previously fixated locations, with a spatial null
+- [API reference](https://bbuchsbaum.github.io/peyesim/reference) — public functions and data structures
 
 ## Key features
 

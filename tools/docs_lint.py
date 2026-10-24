@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Editorial lint for the authored docs surface.
 
-Battle-tested pattern shipped by the quarto-python-docs skill. It keeps a
-docs site honest by failing the build on three classes of drift:
+It keeps a docs site honest by failing the build on three classes of drift:
 
 1. Banned marketing adjectives — replace with the concrete fact.
 2. Identity-by-comparison framing is allowed ONLY under one directory
@@ -32,9 +31,7 @@ DOCS = Path(__file__).resolve().parents[1] / "docs"
 
 # ── EDIT 1: authored surface (everything comparison-gated except COMPARE_DIR)
 AUTHORED = [
-    DOCS / "index.qmd",
-    DOCS / "get-started.qmd",
-    DOCS / "tutorials",
+    DOCS / "source",
 ]
 # No measurement/scoreboard directory exists yet, so identity-by-comparison
 # is allowed nowhere. (If an evidence/ scoreboard is added later, set this
@@ -78,8 +75,8 @@ def iter_files():
         if entry.is_file():
             yield entry
         elif entry.is_dir():
-            yield from sorted(entry.rglob("*.qmd"))
             yield from sorted(entry.rglob("*.md"))
+            yield from sorted(entry.rglob("*.mdx"))
 
 
 def strip_code_blocks(text: str) -> str:

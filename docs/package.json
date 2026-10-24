@@ -1,0 +1,39 @@
+{
+  "name": "peyesim-docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "content": "python ../tools/build_docs.py",
+    "predev": "node scripts/ensure-content.mjs",
+    "dev": "next dev",
+    "prebuild": "node scripts/ensure-content.mjs",
+    "build": "next build",
+    "postbuild": "node scripts/legacy-redirects.mjs",
+    "start": "serve out",
+    "types:check": "next typegen && tsc --noEmit",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "cn": "^0.5.0",
+    "fumadocs-core": "16.17.8",
+    "fumadocs-mdx": "15.4.10",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@16.17.8",
+    "next": "16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "postcss": "^8.5.31",
+    "serve": "^14.2.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "6.0.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.4.2"
+  }
+}

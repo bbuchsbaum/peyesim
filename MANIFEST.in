@@ -1,4 +1,3 @@
-recursive-include docs *.qmd *.yml *.css
+recursive-include docs/source *.md *.json
 recursive-include notebooks *.ipynb
-prune docs/_freeze
-prune docs/_site
+include tools/build_docs.py

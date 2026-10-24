@@ -1,27 +1,29 @@
-.PHONY: docs docs-kernel docs-lint docs-preview docs-clean
-
-QUARTO_PYTHON ?= $(shell command -v python)
-export QUARTO_PYTHON
-PYTHONPATH := $(CURDIR)/src$(if $(PYTHONPATH),:$(PYTHONPATH))
-export PYTHONPATH
-QUARTO_KERNEL_PREFIX ?= $(CURDIR)/.quarto-kernels
-JUPYTER_PATH := $(QUARTO_KERNEL_PREFIX)/share/jupyter$(if $(JUPYTER_PATH),:$(JUPYTER_PATH))
-export JUPYTER_PATH
+.PHONY: docs docs-check docs-content docs-lint docs-preview docs-clean
 
 # Editorial lint is a hard prerequisite — prose drift fails the build,
 # not review.
 docs-lint:
 	python tools/docs_lint.py
 
-docs-kernel:
-	python -m ipykernel install --prefix "$(QUARTO_KERNEL_PREFIX)" --name python3 --display-name "Python 3 (peyesim docs)"
+# Execute docs/source pages and generate the API reference into docs/content.
+docs-content: docs-lint
+	python tools/build_docs.py
 
-docs: docs-lint docs-kernel
-	cd docs && quartodoc build --config _quartodoc.yml && quarto render
+docs/node_modules: docs/package-lock.json
+	cd docs && npm ci
 
-docs-preview: docs-lint docs-kernel
-	cd docs && quartodoc build --config _quartodoc.yml && quarto preview
+# Static site in docs/out (set DOCS_BASE_PATH=/peyesim for GitHub Pages).
+docs: docs-content docs/node_modules
+	cd docs && npm run build
+
+# Lint and type-check the site, build it as GitHub Pages serves it, and check
+# every internal link and anchor.
+docs-check: docs-content docs/node_modules
+	cd docs && npm run lint && npm run types:check && DOCS_BASE_PATH=/peyesim npm run build
+	python tools/check_docs_links.py docs/out --base /peyesim
+
+docs-preview: docs-content docs/node_modules
+	cd docs && npm run dev
 
 docs-clean:
-	rm -rf docs/_site docs/.quarto .quarto-kernels docs/reference/*.qmd docs/reference/_sidebar.yml
-	@touch docs/reference/index.qmd
+	rm -rf docs/content docs/public/reference docs/.source docs/.next docs/out
