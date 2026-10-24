@@ -8,11 +8,12 @@ When participants view the same image multiple times — say, during encoding
 and retrieval — do they look at the same locations each time? And is that
 consistency specific to the repeated stimulus, or just a general gaze pattern?
 
-`repetitive_similarity()` answers these questions by computing within-stimulus
-similarity across experimental conditions and comparing it to cross-stimulus
-similarity. Unlike `template_similarity()` which requires explicit
-encoding-retrieval pairing, `repetitive_similarity()` examines *all* possible
-within-stimulus combinations and summarizes them.
+`repetitive_similarity()` compares each density map with every other map that
+shares its value of a condition variable (`repsim`) and with every map that
+does not (`othersim`). With the stimulus as the condition variable, `repsim` is
+the similarity between viewings of the same image and `othersim` the similarity
+to viewings of other images. Unlike `template_similarity()`, which needs an
+explicit encoding–retrieval pairing, it uses every pair of maps.
 
 
 ```python
@@ -67,63 +68,79 @@ Compute density maps for each participant-phase-image combination:
 eyedens = density_by(
     eyetab,
     groups=["phase", "image", "participant"],
-    sigma=50,
+    sigma=15,
     xbounds=(0, 100),
     ybounds=(0, 100),
 )
 eyedens.drop(columns=["density", "fixgroup"], errors="ignore").head()
 ```
 
+All maps must share one grid (the same `xbounds`, `ybounds` and `outdim`);
+`repetitive_similarity()` refuses the whole call otherwise. Passing explicit
+bounds, as here, guarantees it.
+
 ## Computing repetitive similarity
 
-`repetitive_similarity()` takes the density table and a condition variable
-(here `phase`) that defines the repeated viewings:
+`repetitive_similarity()` takes the density table and the condition variable
+that defines which maps count as repeats. To ask about the stimulus, use the
+image:
 
 ```python
 rep_sim = repetitive_similarity(
     eyedens,
-    condition_var="phase",
+    condition_var="image",
     method="pearson",
 )
 rep_sim.drop(columns=["density", "fixgroup"], errors="ignore")
 ```
 
-The result contains two key columns:
+The result adds two columns:
 
-- **repsim** — within-stimulus similarity: how consistently participants
-  looked at the same locations for the *same* image across conditions
-- **othersim** — cross-stimulus similarity: baseline similarity between
-  *different* images viewed under different conditions
+- **repsim**: the mean similarity of each map to all other maps of the *same*
+  image, across phases and participants.
+- **othersim**: the mean similarity of each map to all maps of *other* images.
+
+The condition variable decides what "same" means. With `condition_var="phase"`,
+`repsim` would instead compare maps from the same phase, across different
+images.
 
 ## Interpreting the results
 
+Each image has four maps (two participants × two phases), so summarise per
+image before plotting:
+
 ```python
-fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+per_image = rep_sim.groupby("image")[["repsim", "othersim"]].mean()
 
-axes[0].bar(rep_sim["image"], rep_sim["repsim"], color="steelblue", alpha=0.7)
-axes[0].set_xlabel("Stimulus")
-axes[0].set_ylabel("Repetitive Similarity")
-axes[0].set_title("Same image across conditions")
-
-axes[1].bar(rep_sim["image"], rep_sim["othersim"], color="coral", alpha=0.7)
-axes[1].set_xlabel("Stimulus")
-axes[1].set_ylabel("Other Similarity")
-axes[1].set_title("Different images across conditions")
-
+fig, ax = plt.subplots(figsize=(6, 3.5))
+per_image.plot.bar(ax=ax, color=["steelblue", "coral"], rot=0)
+ax.set_xlabel("Image")
+ax.set_ylabel("Mean Pearson similarity")
+ax.legend(["Same image (repsim)", "Other images (othersim)"])
 plt.tight_layout()
-plt.show()
 ```
 
-With random data, both values should be near zero. In a real experiment, you
-would expect `repsim` to be higher than `othersim` if participants show
-stimulus-specific eye-movement reinstatement. The difference
-(`repsim - othersim`) gives you a corrected measure of reinstatement that
-controls for general gaze tendencies.
+Neither value is near zero, even though these fixations are random: smoothed
+density maps of fixations spread over the same display correlate positively
+whatever their content. That is why `othersim` is needed as a baseline. The
+difference `repsim - othersim` is the stimulus-specific part, and for random
+data it should hover around zero:
+
+```python
+diff = rep_sim["repsim"] - rep_sim["othersim"]
+diff.describe()[["mean", "std", "min", "max"]].round(3)
+```
+
+In a real experiment, `repsim` above `othersim` indicates that viewers return
+to image-specific locations: stimulus-specific eye-movement reinstatement
+beyond general gaze tendencies.
 
 ## What's next?
 
-- See `repetitive_similarity` docstring for additional options, including `pairwise=True`
-  to return all pairwise similarities instead of summaries
+- `pairwise=True` adds a `pairwise_repsim` column holding each map's
+  similarities to the other maps of its own condition; `repsim` and `othersim`
+  are still returned. For multiscale maps, `multiscale_aggregation` controls how
+  the scales are combined.
 - [Comparing eye-movement patterns](/tutorials/overview) covers the full `template_similarity()` workflow
   with permutation-based baselines
 - [Latent Transforms](/tutorials/latent-transforms) describes domain-adaptation methods that

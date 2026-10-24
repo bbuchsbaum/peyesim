@@ -148,11 +148,12 @@ leakage-free effect estimate.
 
 ## A CORAL-positive control
 
-CORAL is useful when the two domains differ by covariance structure rather
-than a simple geometric warp. The example below creates matched four-element
-density maps, then stretches the source domain along different latent axes.
-Raw cosine similarity is already fairly high, but CORAL should recover the
-known covariance alignment.
+`contract_transform()` works above because the mismatch is geometric in screen
+space. CORAL is a better fit when the shift is a global linear distortion of
+the vectorized density representation itself. This toy example is
+deliberately low-dimensional: each "density" is a 2 × 2 matrix, and the source
+domain is created by scaling each element of the flattened density vector by
+a different factor.
 
 ```python
 def make_tiny_density(vec):
@@ -222,9 +223,12 @@ plt.tight_layout()
 plt.show()
 ```
 
-This is still an in-sample diagnostic. It is useful because it proves the
-transform hook can recover a known domain shift, but it should not be reported
-as an out-of-sample effect estimate.
+Here CORAL does help, because the source shift is an exact linear distortion
+in the representation that CORAL aligns. It is not a model of geometric
+screen-space warping, so it should not replace the contraction example above.
+This is still an in-sample diagnostic: it shows that the transform can recover
+a known domain shift, but it should not be reported as an out-of-sample effect
+estimate.
 
 ## Leakage and double-dipping
 
@@ -292,8 +296,9 @@ transform-based result as part of the substantive analysis. Reserve
 positive controls, and method development.
 
 For retrieval-style analyses, you can also separate the rows used for fitting
-and evaluation. For example, fit on positive-control `scene` rows and evaluate
-on `delay` rows:
+and evaluation. For example, with tables that have `participant`, `scene_id`
+and `phase` columns (not the toy tables above), fit on positive-control
+`scene` rows and evaluate on `delay` rows, with one transform per participant:
 
 ```python
 #| eval: false
@@ -302,7 +307,7 @@ template_similarity_cv(
     match_on="scene_id",
     split_on=["participant", "scene_id"],
     similarity_transform=contract_transform,
-    similarity_transform_args={"shrink": 1e-6},
+    similarity_transform_args={"fit_by": "participant"},
     fit_source_filter=lambda tab: tab["phase"] == "scene",
     eval_source_filter=lambda tab: tab["phase"] == "delay",
     method="cosine",
@@ -317,8 +322,8 @@ trying to rescue.
 | Transform | Supervised? | Best for |
 |:----------|:------------|:---------|
 | `latent_pca_transform()` | No | Dimensionality reduction, mild noise smoothing |
-| `contract_transform()` | Yes (matched pairs) | Global contraction/expansion with translation |
-| `affine_transform()` | Yes (matched pairs) | Linear geometric distortion, shear, anisotropic scaling |
+| `contract_transform()` | Yes (moments of matched rows) | Global contraction/expansion with translation |
+| `affine_transform()` | Yes (moments of matched rows) | Linear geometric distortion, shear, anisotropic scaling |
 | `coral_transform()` | No | Device/participant shifts (covariance-level differences) |
 | `cca_transform()` | Yes (needs matched pairs) | Item-level alignment when pairings are reliable |
 
@@ -331,23 +336,28 @@ template_similarity(
     ref_tab, source_tab,
     match_on="id",
     similarity_transform=cca_transform,
-    similarity_transform_args={"comps": 10, "shrink": 0.01},
+    similarity_transform_args={"comps": 5, "shrink": 0.01},
 )
 ```
 
 ## Choosing a transform
 
-- **PCA** is the safest default — dimensionality reduction with no assumptions
-  about domain differences. Use when you want noise smoothing without domain
-  adaptation.
+- **PCA** makes no assumptions about how the domains differ: it reduces
+  dimensionality and smooths noise, but does no domain adaptation, and it can
+  lower similarity (on the contraction example above it does).
 - **Contract** is a good first geometric model when retrieval looks like a
   globally contracted or expanded version of encoding.
 - **Affine** is the next step when distortion appears anisotropic or sheared
   rather than purely radial.
 - **CORAL** is unsupervised and assumes linear, covariance-level differences
-  between domains. Good for calibration drift or different screen sizes.
+  between domains in the density representation. Because it aligns
+  distributions rather than matched pairs, it is not guaranteed to increase
+  per-item similarity on its own; a spatial shift or contraction is better
+  handled by `contract_transform()` or `affine_transform()`.
 - **CCA** is supervised and leverages matched pairs to find shared latent axes.
-  Set `comps` modestly (5–15) and add `shrink` to stabilize small-N fits.
+  Keep `comps` well below the number of matched pairs (for example 5–15 with
+  large N) and add `shrink` to stabilize small-N fits; with 12 pairs, as here,
+  10 components fit the training rows almost perfectly and generalize poorly.
 
 After the transform, `template_similarity()` still uses your chosen `method`
 (cosine, pearson, fisherz, etc.) on the transformed vectors.
@@ -357,8 +367,9 @@ After the transform, `template_similarity()` still uses your chosen `method`
 - If a transform is fit and evaluated on the same rows via
   `template_similarity()`, the result is exploratory. For leakage-free results,
   use `template_similarity_cv()`.
-- Multiscale densities are supported only when all scales share the same grid
-  size; otherwise latent transforms will error.
+- Multiscale densities are accepted only when all scales share the same grid
+  size (otherwise latent transforms raise an error), and only the first scale
+  is used.
 - Regularization (`shrink`) and component count (`comps`) affect stability on
   small-N data — tune as needed.
 - CORAL and CCA are linear; they will not correct nonlinear spatial warps.
