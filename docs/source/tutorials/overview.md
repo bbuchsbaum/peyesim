@@ -61,11 +61,14 @@ Individual points can be hard to interpret. Density maps show you where
 fixations cluster. Convert a fixation group into an `EyeDensity` and
 plot it as a heatmap:
 
-```python
-ed = eye_density(fg, sigma=35, xbounds=(0, 100), ybounds=(0, 100))
+`sigma` is the standard deviation of the Gaussian kernel, in the units of the
+coordinates. On this 100 × 100 display, values from about 5 to 25 keep the
+structure of the pattern; much larger values spread every fixation over the
+whole display.
 
+```python
 fig, axes = plt.subplots(1, 3, figsize=(14, 4))
-for ax, bw, title in zip(axes, [20, 60, 100], ["Narrow (20)", "Medium (60)", "Wide (100)"]):
+for ax, bw, title in zip(axes, [5, 15, 25], ["Narrow (5)", "Medium (15)", "Wide (25)"]):
     d = eye_density(fg, sigma=bw, xbounds=(0, 100), ybounds=(0, 100))
     ax.imshow(d.z.T, origin="lower", extent=[d.x.min(), d.x.max(), d.y.min(), d.y.max()], cmap="hot")
     ax.set_title(title)
@@ -101,11 +104,16 @@ fg2 = fixation_group(
 ```
 
 ```python
-ed1 = eye_density(fg1, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
-ed2 = eye_density(fg2, sigma=50, xbounds=(0, 100), ybounds=(0, 100))
+ed1 = eye_density(fg1, sigma=10, xbounds=(0, 100), ybounds=(0, 100))
+ed2 = eye_density(fg2, sigma=10, xbounds=(0, 100), ybounds=(0, 100))
 
 print("Pearson similarity:", similarity(ed1, ed2, method="pearson"))
 ```
+
+Large bandwidths make any two maps look alike, so choose `sigma` with care;
+`suggest_sigma()` gives a data-driven starting value. `similarity()` compares
+maps cell by cell and refuses maps on different grids, so pass the same
+`xbounds`, `ybounds` and `outdim` to every map you compare.
 
 Several similarity methods are available:
 
@@ -171,18 +179,22 @@ variables:
 eyedens = density_by(
     eyetab,
     groups=["phase", "image", "participant"],
-    sigma=100,
+    sigma=15,
     xbounds=(0, 100),
     ybounds=(0, 100),
 )
+# One key per participant and image, so each retrieval map is matched with
+# the same participant's encoding map of that image.
+eyedens["match_key"] = eyedens["participant"].astype(str) + "_" + eyedens["image"].astype(str)
 eyedens.drop(columns=["density", "fixgroup"], errors="ignore").head()
 ```
 
 ### Template similarity analysis
 
-`template_similarity()` compares each retrieval density map to its matched
-encoding density map. It estimates a baseline by permuting image labels and
-reports the corrected difference:
+`template_similarity()` compares each retrieval density map with the same
+participant's encoding map of that image. With `permute_on="participant"`, the
+baseline averages that participant's encoding maps of the other images, and the
+result reports the corrected difference:
 
 ```python
 enc_dens = eyedens[eyedens["phase"] == "encoding"].reset_index(drop=True)
@@ -190,7 +202,8 @@ ret_dens = eyedens[eyedens["phase"] == "retrieval"].reset_index(drop=True)
 
 simres = template_similarity(
     enc_dens, ret_dens,
-    match_on="image",
+    match_on="match_key",
+    permute_on="participant",
     method="fisherz",
     permutations=50,
 )
@@ -234,6 +247,10 @@ Fisher z scores (atanh of Pearson r). Convert back to correlations with
 `np.tanh()` if desired. With `method="pearson"` or `"spearman"`, values are
 correlations directly.
 
+**A note on matching.** `match_on` must identify one reference map per source
+row. Matching on `image` alone would pair every participant's retrieval map
+with the *first* encoding map of that image, here participant s1's.
+
 **A note on permutations.** The `permutations` argument is an upper bound. If
 fewer non-matching candidates are available, `peyesim` uses all of them
 exhaustively.
@@ -247,9 +264,12 @@ multiple scales by passing a list of sigma values:
 eyedens_multi = density_by(
     eyetab,
     groups=["phase", "image", "participant"],
-    sigma=[25, 50, 100],
+    sigma=[10, 15, 25],
     xbounds=(0, 100),
     ybounds=(0, 100),
+)
+eyedens_multi["match_key"] = (
+    eyedens_multi["participant"].astype(str) + "_" + eyedens_multi["image"].astype(str)
 )
 
 enc_multi = eyedens_multi[eyedens_multi["phase"] == "encoding"].reset_index(drop=True)
@@ -257,7 +277,8 @@ ret_multi = eyedens_multi[eyedens_multi["phase"] == "retrieval"].reset_index(dro
 
 simres_multi = template_similarity(
     enc_multi, ret_multi,
-    match_on="image",
+    match_on="match_key",
+    permute_on="participant",
     method="fisherz",
     permutations=50,
 )
@@ -266,8 +287,9 @@ print(f"Single-scale mean: {simres['eye_sim_diff'].mean():.4f}")
 print(f"Multiscale mean:   {simres_multi['eye_sim_diff'].mean():.4f}")
 ```
 
-Multiscale analysis provides a more robust similarity estimate by averaging
-across spatial resolutions.
+With the default `multiscale_aggregation="mean"`, each comparison is the
+average over the scales, which makes the result depend less on any single
+bandwidth. Pass `multiscale_aggregation="none"` to keep one value per scale.
 
 ## How does similarity evolve over time?
 
@@ -280,9 +302,6 @@ fixation over a sequence of time points:
 enc_temporal = enc_dens.copy()
 ret_temporal = eyetab[eyetab["phase"] == "retrieval"].reset_index(drop=True).copy()
 
-enc_temporal["match_key"] = (
-    enc_temporal["participant"].astype(str) + "_" + enc_temporal["image"].astype(str)
-)
 ret_temporal["match_key"] = (
     ret_temporal["participant"].astype(str) + "_" + ret_temporal["image"].astype(str)
 )
@@ -291,7 +310,7 @@ temporal = sample_density_time(
     template_tab=enc_temporal,
     source_tab=ret_temporal,
     match_on="match_key",
-    times=np.arange(0, 501, 50),
+    times=np.arange(0, 500, 50),
     time_bins=np.array([0, 250, 500]),
     permutations=10,
     permute_on="participant",
@@ -305,7 +324,12 @@ temporal[
 
 The `sampled` column contains the full time course for each retrieval trial.
 The `bin_*` columns summarize early and late windows, while `diff_bin_*`
-subtracts a participant-stratified permutation baseline.
+subtracts a participant-stratified permutation baseline. Bins are half-open,
+[lower, upper), so a time equal to the last break (500) would fall in no bin.
+Times before a trial's first fixation have no gaze position and give NaN. With
+real data, a positive `diff_bin_*` shows when retrieval gaze returns to regions
+fixated during encoding; these data are random, so the differences are near
+zero.
 
 ```python
 time_rows = []
@@ -330,6 +354,8 @@ plt.show()
 
 ## What's next?
 
-- [MultiMatch](/tutorials/multimatch) — compare scanpath structure across six dimensions
+- [MultiMatch](/tutorials/multimatch) — compare scanpath structure on MultiMatch's five dimensions plus an order-free EMD position measure
 - [Repetitive Similarity](/tutorials/repetitive-similarity) — analyze repeated viewing of the same stimulus
 - [Latent Transforms](/tutorials/latent-transforms) — domain adaptation for cross-device or cross-participant comparisons
+- [Revisitation](/tutorials/revisitation) — returns to previously fixated locations within a viewing
+- Real data: `load_dataset("wynn_study")` and `load_dataset("wynn_test")` hold a recognition-memory experiment

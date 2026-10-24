@@ -15,12 +15,12 @@ across five distinct dimensions:
 | **vector** | Overall shape similarity of saccade vectors |
 | **direction** | Angular similarity of saccade directions |
 | **length** | Similarity of saccade amplitudes |
-| **position** | Spatial proximity of corresponding fixations |
-| **duration** | Similarity of fixation durations |
+| **position** | Distance between the start points of aligned saccades (the last fixation is not included) |
+| **duration** | Relative difference `abs(d1 - d2) / max(d1, d2)` of aligned fixation durations |
 
-The `peyesim` implementation adds a sixth metric, **position_emd**, based on
-the earth mover's distance between fixation locations. This captures
-distributional similarity that is not order-dependent.
+The `peyesim` implementation adds a sixth measure, **position_emd**: the
+duration-weighted earth mover's distance between all fixations (including the
+last), as `1 - EMD / screen diagonal`. It ignores the order of the fixations.
 
 
 ```python
@@ -67,7 +67,9 @@ Let's compare a linear scanpath against a zigzag pattern:
 ```python
 fg_zigzag = fixation_group(
     x=np.cumsum(np.full(10, 50.0)),
-    y=np.cumsum(np.array([50, -50, 50, -50, 50, -50, 50, -50, 50, -50], dtype=float)),
+    # alternate shallow and steep downward saccades: neither leg points the
+    # way the linear path goes (up and to the right)
+    y=400 + np.cumsum(np.tile([-10.0, -50.0], 5)),
     duration=rng.poisson(200, 10),
     onset=np.arange(1, 11, dtype=float),
 )
@@ -77,8 +79,11 @@ sp_zigzag = scanpath(fg_zigzag)
 multi_match(sp_linear, sp_zigzag, screensize=(500, 500))
 ```
 
-Notice how the **direction** metric drops substantially — the zigzag and
-linear paths follow very different angular trajectories.
+**Direction** falls well below its value for random pairs (about 0.72, shown
+below): neither zigzag leg points the way the linear path goes, so no alignment
+can pair them up. (A zigzag that alternates between up-right and down-right
+legs would not show this reliably, because the alignment can pair the up-right
+legs with the linear path.)
 
 ## What do the metrics look like for random scanpaths?
 
@@ -208,9 +213,10 @@ plot_extreme_grid("high")
 plt.show()
 ```
 
-The high-scoring examples show that a metric can look sensible even when
-another dimension of the same pair is unremarkable. For example, a pair may
-score high on duration while its spatial trajectory is not especially similar.
+The highest-scoring pairs are not visibly similar scanpaths: with ten random
+fixations each, a pair can score highly on one dimension (for example, similar
+saccade lengths) while differing everywhere else. This is why the six measures
+are reported separately rather than averaged.
 
 ```python
 #| fig-width: 8
@@ -220,9 +226,9 @@ plot_extreme_grid("low")
 plt.show()
 ```
 
-The low-scoring examples are just as important. They show which visual
-differences each metric penalizes: spatial displacement for position, angular
-changes for direction, and temporal mismatch for duration.
+The lowest-scoring pairs are not visibly more different than the others either:
+with ten random fixations, a low score on one dimension says little about the
+rest. (These plots do not show fixation durations.)
 
 ## How do transformations affect the metrics?
 
