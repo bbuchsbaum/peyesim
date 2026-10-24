@@ -125,9 +125,35 @@ for ax, m, lbl, c in zip(axes.ravel(), metrics, labels, colors):
 plt.show()
 ```
 
-Each metric has a distinct baseline distribution. Direction similarity, for
-instance, clusters near 0.5 for random pairs, while position similarity is
-typically lower.
+None of the metrics sits near zero for unrelated scanpaths. Their medians over
+the random pairs are the baseline that a single similarity value has to be
+read against:
+
+```python
+ssdf[metrics].median().round(2).sort_values()
+```
+
+Direction is a useful example. Two independent saccade directions differ by
+an angle that is uniform on [0, π], which would put direction similarity near
+0.5. But MultiMatch first aligns the two scanpaths, pairing each saccade with
+the one in the other scanpath that makes the vector difference smallest, and
+that alignment favours saccades pointing the same way. Comparing saccade *i*
+with saccade *i*, without the alignment, does give about 0.5:
+
+```python
+def unaligned_direction(fg_a, fg_b):
+    # saccade directions; the last row of a scanpath has no outgoing saccade
+    theta_a = scanpath(fg_a)["theta"].to_numpy()[:-1]
+    theta_b = scanpath(fg_b)["theta"].to_numpy()[:-1]
+    # absolute angle between saccade i and saccade i, in [0, pi]
+    diff = np.abs(np.angle(np.exp(1j * (theta_a - theta_b))))
+    return 1 - np.median(diff) / np.pi
+
+pd.Series({
+    "aligned (mm_direction)": ssdf["mm_direction"].median(),
+    "unaligned": np.median([unaligned_direction(a, b) for a, b in fgs_list]),
+}).round(2)
+```
 
 ## What do extreme matches look like?
 
@@ -236,8 +262,9 @@ As expected, **direction** stays at 1.0, but **position** drops.
 
 ### Shuffling fixation order
 
-Keeping the same fixation locations but scrambling their order preserves
-**position** (and the EMD) while disrupting **direction**:
+Keeping the same fixation locations but scrambling their order (and their
+durations) separates the order-insensitive EMD from the sequence-based
+metrics:
 
 ```python
 rng2 = np.random.default_rng(3)
@@ -251,8 +278,11 @@ print("Order-shuffled:")
 multi_match(scanpath(fg), scanpath(fg_shuffled), (500, 500))
 ```
 
-The **position_emd** remains high (same spatial distribution), while
-**direction** drops (the trajectory has changed).
+Only **position_emd** is unchanged: it compares the two sets of fixations
+regardless of order, and the set is the same. **Position** drops as well as
+**direction**, because MultiMatch's position compares the start points of
+aligned saccades in sequence, and reordering moves them. **Duration** drops
+because the durations were shuffled with the locations.
 
 ## References
 
