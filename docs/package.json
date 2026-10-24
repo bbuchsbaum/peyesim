@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "content": "python ../tools/build_docs.py",
+    "predev": "node scripts/ensure-content.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/ensure-content.mjs",
     "build": "next build",
+    "postbuild": "node scripts/legacy-redirects.mjs",
     "start": "serve out",
     "types:check": "next typegen && tsc --noEmit",
-    "postbuild": "node scripts/legacy-redirects.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "cn": "^0.5.0",
@@ -29,6 +32,8 @@
     "postcss": "^8.5.31",
     "serve": "^14.2.6",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2"
+    "typescript": "6.0.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "16.4.2"
   }
 }

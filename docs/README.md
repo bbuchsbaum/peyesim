@@ -12,9 +12,20 @@ GitHub Pages by `.github/workflows/docs.yml`.
 
 ```bash
 pip install -e ".[docs,viz]"   # from the repository root
-make docs-preview              # lint, generate content, run the dev server
-make docs                      # static export in docs/out
+cd docs && npm ci && npm run dev
 ```
+
+`npm run dev` and `npm run build` generate `content/` first when it is
+missing. After editing `source/` or a docstring, run `npm run content` (or
+`make docs-content`) to regenerate it; the dev server picks up the change.
+
+From the repository root, `make docs-check` does what CI does: prose lint,
+ESLint, type check, a build under the `/peyesim` base path, and a check that
+every internal link and anchor resolves.
+
+Old Quarto URLs keep working: `x.html` pages redirect to `x/`, and the former
+per-object reference pages (`reference/<name>.html`) redirect to the object's
+entry on its section page.
 
 Cell options go on leading `#|` lines: `#| eval: false` shows code without
 running it, `#| echo: false` hides the code, `#| output: false` hides the

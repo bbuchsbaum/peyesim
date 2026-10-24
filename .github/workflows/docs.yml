@@ -9,6 +9,7 @@ on:
       - "src/**"
       - "tools/build_docs.py"
       - "tools/docs_lint.py"
+      - "tools/check_docs_links.py"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -54,9 +55,13 @@ jobs:
           NEXT_TELEMETRY_DISABLED: "1"
         run: |
           npm ci
+          npm run lint
           npm run types:check
           npm run build
           touch out/.nojekyll
+
+      - name: Check internal links and anchors
+        run: python tools/check_docs_links.py docs/out --base /peyesim
 
       - uses: actions/configure-pages@v5
         if: github.event_name != 'pull_request'

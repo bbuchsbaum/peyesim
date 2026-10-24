@@ -124,7 +124,7 @@ controls for general gaze tendencies.
 
 - See `repetitive_similarity` docstring for additional options, including `pairwise=True`
   to return all pairwise similarities instead of summaries
-- [Overview notebook](overview.qmd) covers the full `template_similarity()` workflow
+- [Comparing eye-movement patterns](/tutorials/overview) covers the full `template_similarity()` workflow
   with permutation-based baselines
-- [Latent Transforms](latent-transforms.qmd) describes domain-adaptation methods that
+- [Latent Transforms](/tutorials/latent-transforms) describes domain-adaptation methods that
   can improve similarity estimates across devices or participants

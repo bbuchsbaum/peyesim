@@ -11,7 +11,9 @@ Two inputs become Markdown pages under ``docs/content/docs/``:
   hide the code) and ``#| output: false`` (run, hide the results).
   ``meta.json`` files are copied as they are.
 * The package docstrings, read with griffe (NumPy style), become one API
-  reference page per section of ``REFERENCE_SECTIONS``.
+  reference page per section of ``REFERENCE_SECTIONS``. Redirect pages for the
+  old Quarto per-object URLs (``reference/<name>.html``) go to
+  ``docs/public/reference/``.
 
 Run from anywhere: ``python tools/build_docs.py``. The output directory is
 replaced on every run, so it is safe to delete. A failing cell stops the
@@ -35,6 +37,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PAGES = REPO / "docs" / "source"
 CONTENT = REPO / "docs" / "content" / "docs"
+# Static files copied into the site as they are (generated, not committed).
+LEGACY = REPO / "docs" / "public" / "reference"
 
 # Reference pages: (slug, title, description, public names). Every name in
 # peyesim.__all__ must appear exactly once (tests/test_docs_reference.py).
@@ -248,7 +252,8 @@ def render_page(src: Path, dest: Path) -> int:
 # ---------------------------------------------------------------------------
 
 def _anchor(name: str) -> str:
-    return name.lower().replace("_", "-")
+    """The heading id Fumadocs (github-slugger) gives ``## name``."""
+    return re.sub(r"[^a-z0-9 _-]", "", name.lower()).replace(" ", "-")
 
 
 def _reference_index() -> dict[str, str]:
@@ -387,7 +392,9 @@ def render_reference(dest_dir: Path) -> int:
     pages = []
     for slug, title, description, names in REFERENCE_SECTIONS:
         pages.append(slug)
-        index.append(f"## [{title}](/reference/{slug})\n\n{description}\n")
+        # No link inside the heading: Fumadocs renders heading links without
+        # the site's base path.
+        index.append(f"## {title}\n\n{description} [Section page](/reference/{slug}).\n")
         index.append("\n".join(f"- [`{n}`]({links[n]})" for n in names) + "\n")
 
         front = f"---\ntitle: {json.dumps(title)}\ndescription: {json.dumps(description)}\n---\n\n"
@@ -415,8 +422,26 @@ def render_reference(dest_dir: Path) -> int:
         (dest_dir / f"{slug}.md").write_text(front + "\n\n".join(body), encoding="utf-8")
 
     (dest_dir / "index.md").write_text("\n".join(index), encoding="utf-8")
+    _write_legacy_reference_redirects(links)
     (dest_dir / "meta.json").write_text(json.dumps({"title": "API reference", "pages": pages}, indent=2) + "\n")
     return sum(len(n) for *_, n in REFERENCE_SECTIONS)
+
+
+def _write_legacy_reference_redirects(links: dict[str, str]) -> None:
+    """Redirect the Quarto site's per-object pages (reference/<name>.html).
+
+    The targets are relative, so the pages work under any base path.
+    """
+    LEGACY.mkdir(parents=True, exist_ok=True)
+    for name, url in links.items():
+        page, anchor = url.removeprefix("/reference/").split("#")
+        target = f"./{page}/#{anchor}"
+        (LEGACY / f"{name}.html").write_text(
+            '<!doctype html><meta charset="utf-8"><title>Moved</title>'
+            f'<meta http-equiv="refresh" content="0; url={target}">'
+            f'<a href="{target}">{name}</a>\n',
+            encoding="utf-8",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -426,8 +451,9 @@ def main(argv: list[str] | None = None) -> int:
 
     os.environ.setdefault("MPLBACKEND", "Agg")
     sys.path.insert(0, str(REPO / "src"))
-    if CONTENT.exists():
-        shutil.rmtree(CONTENT)
+    for generated in (CONTENT, LEGACY):
+        if generated.exists():
+            shutil.rmtree(generated)
     CONTENT.mkdir(parents=True)
 
     total = 0

@@ -365,5 +365,5 @@ After the transform, `template_similarity()` still uses your chosen `method`
   `contract_transform()` and `affine_transform()` help with simple geometric
   distortion, but not highly nonlinear warps.
 - Keep `comps` low to reduce overfitting, especially with few pairs.
-- See the [Overview notebook](overview.qmd) for the core `template_similarity()` workflow
+- See the [Comparing eye-movement patterns](/tutorials/overview) for the core `template_similarity()` workflow
   without transforms.

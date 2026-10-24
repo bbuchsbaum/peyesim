@@ -9,7 +9,7 @@ particular sequence. If you later see that same image during a memory test, do
 you look at the same places? This kind of "eye-movement reinstatement"
 tracks memory retrieval, and `peyesim` gives you the tools to measure it.
 
-This notebook walks you through the core workflow: representing fixations,
+This tutorial walks you through the core workflow: representing fixations,
 computing density maps, and measuring similarity between fixation patterns
 across experimental conditions.
 
@@ -330,6 +330,6 @@ plt.show()
 
 ## What's next?
 
-- [MultiMatch](multimatch.qmd) — compare scanpath structure across five dimensions
-- [Repetitive Similarity](repetitive-similarity.qmd) — analyze repeated viewing of the same stimulus
-- [Latent Transforms](latent-transforms.qmd) — domain adaptation for cross-device or cross-participant comparisons
+- [MultiMatch](/tutorials/multimatch) — compare scanpath structure across six dimensions
+- [Repetitive Similarity](/tutorials/repetitive-similarity) — analyze repeated viewing of the same stimulus
+- [Latent Transforms](/tutorials/latent-transforms) — domain adaptation for cross-device or cross-participant comparisons
