@@ -3,6 +3,13 @@ name: Docs
 on:
   push:
     branches: [main]
+  pull_request:
+    paths:
+      - "docs/**"
+      - "src/**"
+      - "tools/build_docs.py"
+      - "tools/docs_lint.py"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 permissions:
@@ -11,7 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: "pages-${{ github.ref }}"
   cancel-in-progress: true
 
 jobs:
@@ -25,32 +32,42 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
       - name: Install package + docs deps
-        run: |
-          pip install -e ".[docs,viz]"
-
-      - uses: quarto-dev/quarto-actions/setup@v2
-
-      - name: Show docs dependency versions
-        run: |
-          python -c "import importlib.metadata as md; print('quartodoc', md.version('quartodoc')); print('griffe', md.version('griffe'))"
+        run: pip install -e ".[docs,viz]"
 
       - name: Lint authored docs
         run: python tools/docs_lint.py
 
-      - name: Build docs site
+      - name: Execute pages and generate the API reference
+        run: python tools/build_docs.py
+
+      - name: Build site
+        working-directory: docs
+        env:
+          DOCS_BASE_PATH: /peyesim
+          NEXT_TELEMETRY_DISABLED: "1"
         run: |
-          cd docs
-          quartodoc build --config _quartodoc.yml
-          quarto render
+          npm ci
+          npm run types:check
+          npm run build
+          touch out/.nojekyll
 
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
-          path: docs/_site
+          path: docs/out
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:

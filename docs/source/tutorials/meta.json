@@ -1,0 +1,11 @@
+{
+  "title": "Tutorials",
+  "defaultOpen": true,
+  "pages": [
+    "overview",
+    "multimatch",
+    "repetitive-similarity",
+    "latent-transforms",
+    "revisitation"
+  ]
+}
