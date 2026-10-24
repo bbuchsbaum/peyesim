@@ -200,11 +200,13 @@ simres = template_similarity(
 simres.drop(columns=["density", "fixgroup"], errors="ignore").head()
 ```
 
-The result includes three key columns:
+The result includes four key columns:
 
 - `eye_sim` — raw similarity between matched pairs
 - `perm_sim` — average similarity across non-matching pairs (baseline)
 - `eye_sim_diff` — the corrected score (raw minus baseline)
+- `n_perm` — how many distinct non-matching templates entered the baseline
+  (0 when none could be computed)
 
 Since our data is random, there should be no true reinstatement:
 

@@ -31,20 +31,25 @@ def calcangle(x1, x2):
     """Angle (degrees) between two vectors."""
     x1 = np.asarray(x1, dtype=float)
     x2 = np.asarray(x2, dtype=float)
-    cos_val = np.dot(x1, x2) / (np.linalg.norm(x1) * np.linalg.norm(x2))
+    # R's norm(x, "2") is the largest singular value; computing it the same way
+    # keeps near-parallel angles (where arccos is ill-conditioned) bitwise close.
+    def norm2(v):
+        return np.linalg.svd(v.reshape(-1, 1), compute_uv=False)[0]
+
+    cos_val = np.sum(x1 * x2) / (norm2(x1) * norm2(x2))
+    # Clamp: rounding can push the cosine of (anti)parallel vectors just past
+    # +/-1, where arccos() returns NaN (as in R's calcangle()).
     cos_val = np.clip(cos_val, -1.0, 1.0)
-    if np.isclose(cos_val, 1.0):
-        return 0.0
-    if np.isclose(cos_val, -1.0):
-        return 180.0
-    return np.degrees(np.arccos(cos_val))
+    return float(np.degrees(np.arccos(cos_val)))
 
 
 def scanpath(fg: FixationGroup) -> Scanpath:
     """Create a :class:`Scanpath` from a :class:`FixationGroup`.
 
     Adds columns ``lenx``, ``leny``, ``rho``, ``theta`` computed from
-    successive fixation differences.
+    successive fixation differences. Saccades join consecutive rows, so rows
+    should be in temporal order; they are not re-sorted by onset (a group that
+    pools several viewings keeps each viewing's fixations together).
     """
     xs = fg["x"].to_numpy()
     ys = fg["y"].to_numpy()

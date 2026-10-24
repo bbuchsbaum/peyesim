@@ -115,6 +115,18 @@ def _fit_rlm_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept: boo
     })
 
 
+_MULTIREG_METHODS = ("lm", "rlm", "nnls", "logistic")
+
+
+def _match_arg(method, choices, label):
+    """R ``match.arg()``: ``None`` or the full choice vector selects the first."""
+    if method is None or (isinstance(method, (list, tuple)) and list(method) == list(choices)):
+        return choices[0]
+    if method not in choices:
+        raise ValueError(f"Unknown {label} method '{method}'. Supported methods: {', '.join(choices)}.")
+    return method
+
+
 def template_multireg(
     source_tab: pd.DataFrame,
     response: str,
@@ -124,8 +136,9 @@ def template_multireg(
 ) -> pd.DataFrame:
     """Multiple regression of density maps (mirrors R ``template_multireg``).
 
-    Supported methods: 'lm', 'rlm', 'logistic', 'nnls'.
+    Supported methods: 'lm' (default), 'rlm', 'nnls', 'logistic'.
     """
+    method = _match_arg(method, _MULTIREG_METHODS, "regression")
     results = []
     for i in range(len(source_tab)):
         row = source_tab.iloc[i]
@@ -215,14 +228,40 @@ def template_regression(
     baseline_tab: pd.DataFrame,
     baseline_key: str,
     method: str = "lm",
+    density_var: str = "density",
 ) -> pd.DataFrame:
-    """Template regression with baseline control (mirrors R ``template_regression``)."""
+    """Template regression with baseline control (mirrors R ``template_regression``).
+
+    Each ``baseline_key`` value used by ``source_tab`` must appear in exactly one
+    row of ``baseline_tab``; duplicated or missing keys are an error.
+    ``density_var`` names the density column in all three tables.
+    """
+    method = _match_arg(method, ("lm", "rlm", "rank"), "template_regression")
     source_tab = source_tab.copy().reset_index(drop=True)
     matchind = match_keys(source_tab[match_on].values, ref_tab[match_on].values)
     source_tab, matchind = filter_unmatched(
         source_tab, matchind,
         warn_msg="did not find matching template map for all source maps. Removing non-matching elements.",
     )
+
+    # Each baseline key used by a source row must identify exactly one map.
+    baseline_keys = pd.Series(baseline_tab[baseline_key].values)
+    used_keys = list(dict.fromkeys(source_tab[baseline_key].tolist()))
+    duplicated = set(baseline_keys[baseline_keys.duplicated()].tolist())
+    dup_keys = [k for k in used_keys if k in duplicated]
+    if dup_keys:
+        raise ValueError(
+            f"template_regression(): baseline_tab has more than one row for {baseline_key} = "
+            + ", ".join(str(k) for k in dup_keys)
+            + ". Each baseline key must identify exactly one baseline map."
+        )
+    known = set(baseline_keys.tolist())
+    missing_keys = [k for k in used_keys if k not in known]
+    if missing_keys:
+        raise ValueError(
+            f"template_regression(): baseline_tab has no row for {baseline_key} = "
+            + ", ".join(str(k) for k in missing_keys) + "."
+        )
 
     b0_list = []
     b1_list = []
@@ -231,14 +270,9 @@ def template_regression(
         row = source_tab.iloc[i]
         bkey_val = row[baseline_key]
         b_idx = np.where(baseline_tab[baseline_key].values == bkey_val)[0]
-        if len(b_idx) == 0:
-            b0_list.append(np.nan)
-            b1_list.append(np.nan)
-            continue
-
-        bdens = baseline_tab["density"].iloc[b_idx[0]]
-        d1 = ref_tab["density"].iloc[mi]
-        d2 = row["density"]
+        bdens = baseline_tab[density_var].iloc[b_idx[0]]
+        d1 = ref_tab[density_var].iloc[mi]
+        d2 = row[density_var]
 
         y_vec = d2.z.ravel()
         baseline_vec = bdens.z.ravel()
@@ -275,18 +309,24 @@ def template_sample(
     time=None,
     outcol: str = "sample_out",
 ) -> pd.DataFrame:
-    """Sample template densities at fixation coordinates for each row in ``source_tab``."""
+    """Sample template densities at fixation coordinates for each row in ``source_tab``.
+
+    Rows whose template or fixation group is ``None`` cannot be sampled and are
+    removed, with a warning.
+    """
     if template not in source_tab.columns:
         raise KeyError(f"Column '{template}' not found in source_tab")
     if fixgroup not in source_tab.columns:
         raise KeyError(f"Column '{fixgroup}' not found in source_tab")
 
-    out = source_tab.copy()
-    sampled = []
-    for dens, fg in zip(out[template], out[fixgroup]):
-        if dens is None or fg is None:
-            sampled.append(None)
-            continue
-        sampled.append(sample_density(dens, fg, times=time))
+    # Rows whose template or fixation group is missing cannot be sampled.
+    drop = np.array([dens is None or fg is None
+                     for dens, fg in zip(source_tab[template], source_tab[fixgroup])], dtype=bool)
+    if drop.any():
+        warnings.warn(
+            f"template_sample(): removing {int(drop.sum())} row(s) with a NULL template or fixation group."
+        )
+    out = source_tab.loc[~drop].copy()
+    sampled = [sample_density(dens, fg, times=time) for dens, fg in zip(out[template], out[fixgroup])]
     out[outcol] = sampled
     return out

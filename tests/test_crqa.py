@@ -25,7 +25,7 @@ def test_crqa_matches_radius_recurrence_for_r_wrapper_fixture():
     assert result["LAM"] == pytest.approx(100.0)
     assert result["TT"] == pytest.approx(5.0)
     assert result["max_vertlength"] == 5
-    np.testing.assert_array_equal(result["RP"], result["recurrence_matrix"])
+    np.testing.assert_array_equal(result["RP"], result["recurrence_matrix"].T)
     assert result["recurrence_matrix"].shape == (5, 5)
     assert result["recurrence_matrix"].dtype == bool
 

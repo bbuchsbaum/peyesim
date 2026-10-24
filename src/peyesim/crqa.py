@@ -104,26 +104,30 @@ def crqa(
 ) -> dict:
     """Compute multidimensional cross-recurrence summaries.
 
-    The default mirrors the R wrapper in ``eyesim``: both inputs are truncated
-    to their shared length, the two coordinate columns are analyzed, and points
-    within ``radius`` are recurrent.
+    Mirrors the R wrapper in ``eyesim``, which calls ``crqa::crqa(method =
+    "mdcrqa")``: both inputs are truncated to their shared length, their ``x``
+    and ``y`` columns are delay-embedded (``delay``, ``embed``), and points
+    within ``radius`` under ``metric`` are recurrent. ``rescale`` follows
+    ``crqa``: 0 uses ``radius`` as is; 1, 2, 3 and 4 multiply it by the mean,
+    maximum, minimum or off-diagonal mean of the cross-distance matrix.
+
+    ``recurrence_matrix`` has ``fg1`` along the rows; ``RP`` is its transpose,
+    oriented like the ``RP`` returned by ``crqa::crqa()``.
     """
+    if metric not in ("euclidean", "manhattan"):
+        raise ValueError("metric must be 'euclidean' or 'manhattan'.")
+    rescale = int(rescale)
+    if rescale not in (0, 1, 2, 3, 4):
+        raise ValueError("rescale must be 0 (none), 1 (mean), 2 (max), 3 (min) or 4 (off-diagonal mean).")
+
     coords1 = _coordinate_matrix(fg1)
     coords2 = _coordinate_matrix(fg2)
     n_rows = min(len(coords1), len(coords2))
     if n_rows == 0:
-        raise ValueError("CRQA inputs must contain at least one row.")
+        raise ValueError("crqa requires non-empty fixation groups.")
 
     coords1 = coords1[:n_rows]
     coords2 = coords2[:n_rows]
-
-    if rescale:
-        pooled = np.vstack([coords1, coords2])
-        center = np.nanmean(pooled, axis=0)
-        scale = np.nanstd(pooled, axis=0, ddof=0)
-        scale = np.where(scale == 0, 1.0, scale)
-        coords1 = (coords1 - center) / scale
-        coords2 = (coords2 - center) / scale
 
     coords1 = _embed_series(coords1, delay=delay, embed=embed)
     coords2 = _embed_series(coords2, delay=delay, embed=embed)
@@ -132,8 +136,21 @@ def crqa(
     coords2 = coords2[:n_rows]
 
     metric_map = {"euclidean": "euclidean", "manhattan": "cityblock"}
-    dist = cdist(coords1, coords2, metric=metric_map.get(metric, metric))
-    recurrence = dist <= radius
+    dist = cdist(coords1, coords2, metric=metric_map[metric])
+
+    # crqa::crqa() rescales the radius by a statistic of the distance matrix.
+    effective_radius = float(radius)
+    if rescale:
+        n_d = dist.shape[0]
+        stat = {
+            1: lambda: float(np.mean(dist)),
+            2: lambda: float(np.max(dist)),
+            3: lambda: float(np.min(dist)),
+            4: lambda: abs(float(np.sum(dist)) / (n_d ** 2 - n_d)) if n_d > 1 else np.nan,
+        }[rescale]()
+        effective_radius = float(radius) * stat
+
+    recurrence = dist <= effective_radius
     recurrent_points = int(recurrence.sum())
     total_points = int(recurrence.size)
 
@@ -146,10 +163,11 @@ def crqa(
     laminarity = vert_points / recurrent_points if recurrent_points else np.nan
     max_vertlength = int(max(vert_lengths)) if vert_lengths else -np.inf
 
-    return {
+    result = {
         "recurrence_matrix": recurrence,
         "distance_matrix": dist,
         "radius": float(radius),
+        "effective_radius": effective_radius,
         "n_points": int(n_rows),
         "recurrent_points": recurrent_points,
         "recurrence_rate": recurrence_rate,
@@ -170,5 +188,12 @@ def crqa(
         "TT": float(np.mean(vert_lengths)) if vert_lengths else np.nan,
         "catH": np.nan,
         "max_vertlength": max_vertlength,
-        "RP": recurrence,
+        # crqa::crqa() returns the plot with ts2 along the rows.
+        "RP": recurrence.T,
     }
+    if recurrent_points == 0:
+        # crqa::crqa()'s "no recurrence" result.
+        result.update({"RR": 0.0, "DET": np.nan, "NRLINE": 0, "maxL": 0, "L": 0.0,
+                       "ENTR": np.nan, "rENTR": np.nan, "LAM": np.nan, "TT": np.nan,
+                       "max_vertlength": np.nan})
+    return result

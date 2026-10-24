@@ -33,7 +33,6 @@ R_NAMESPACE_EXPORTS = {
     "coords",
     "coral_transform",
     "density_by",
-    "density_matrix",
     "eye_density",
     "eye_table",
     "fixation_entropy",
@@ -62,12 +61,54 @@ R_NAMESPACE_EXPORTS = {
     "template_sample",
     "template_similarity",
     "template_similarity_cv",
+    # eyesim 0.2.0 - 0.3.x
+    "eyesim_colours",
+    "theme_eyesim",
+    "theme_eyesim_spatial",
+    "fixation_revisits",
+    "revisit_summary",
+    "visual_angle_to_px",
+    "px_to_visual_angle",
 }
+
+# R exports whose Python counterpart has another name, or that are R-specific.
+R_EXPORT_ALIASES = {
+    "scale_fill_eyesim_density": "eyesim_density_cmap",
+    "scale_colour_eyesim_time": "eyesim_time_cmap",
+}
+R_ONLY_EXPORTS = {
+    # ggplot2 theme element for wrapped titles; matplotlib wraps nothing.
+    "element_text_wrap",
+}
+
+
+def _is_gazeweave(name: str) -> bool:
+    # GazeWeave is experimental in R eyesim and deliberately not ported.
+    return name.startswith("gaze_") or name == "fit_gaze_replay_model"
 
 
 def test_python_public_api_covers_r_namespace_exports():
     missing = R_NAMESPACE_EXPORTS.difference(peyesim.__all__)
     assert missing == set()
+
+
+def test_python_public_api_covers_live_r_namespace():
+    """Every non-GazeWeave export of the R source tree has a Python counterpart."""
+    from tests.r_oracle import eyesim_source_dir
+
+    namespace = eyesim_source_dir() / "NAMESPACE"
+    if not namespace.is_file():
+        pytest.skip(f"R eyesim source not found at {namespace.parent}")
+    import re
+
+    exports = set(re.findall(r"^export\(([^)]+)\)", namespace.read_text(), flags=re.M))
+    exports = {name.strip('"') for name in exports}
+    wanted = {
+        R_EXPORT_ALIASES.get(name, name)
+        for name in exports
+        if not _is_gazeweave(name) and name not in R_ONLY_EXPORTS
+    }
+    assert wanted.difference(peyesim.__all__) == set()
 
 
 def test_fixation_wrapper_exports_dispatch_to_fixation_group_methods():

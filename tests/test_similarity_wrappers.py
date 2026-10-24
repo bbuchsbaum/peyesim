@@ -73,10 +73,19 @@ def test_fixation_similarity_overlap_returns_scalar():
     enc = eyetab[eyetab["phase"] == "enc"].reset_index(drop=True)
     ret = eyetab[eyetab["phase"] == "ret"].reset_index(drop=True)
 
-    result = fixation_similarity(enc, ret, match_on="image", method="overlap")
+    result = fixation_similarity(enc, ret, match_on="image", method="overlap",
+                                 time_samples=np.arange(0, 1000, 20))
     assert "eye_sim" in result.columns
     assert result["eye_sim"].dtype == float
     assert len(result) == 2
+
+
+def test_fixation_similarity_overlap_requires_time_samples():
+    eyetab = _make_eyetab()
+    enc = eyetab[eyetab["phase"] == "enc"].reset_index(drop=True)
+    ret = eyetab[eyetab["phase"] == "ret"].reset_index(drop=True)
+    with pytest.raises(ValueError, match="time_samples"):
+        fixation_similarity(enc, ret, match_on="image", method="overlap")
 
 
 # ---- Bug 1: fixation_similarity with sinkhorn ----
@@ -294,3 +303,14 @@ def test_fixation_similarity_overlap_identical_returns_one():
     assert "eye_sim" in result.columns
     # Identical data compared to itself must yield perfect overlap
     assert all(result["eye_sim"] == 1.0)
+
+
+def test_similarity_overlap_forwards_dist_method():
+    from peyesim import fixation_group, similarity
+
+    a = fixation_group(x=[0.0], y=[0.0], onset=[0.0], duration=[100.0])
+    b = fixation_group(x=[40.0], y=[40.0], onset=[0.0], duration=[100.0])
+    times = np.array([0.0, 50.0])
+    # Euclidean distance 56.6 < 60 overlaps; Manhattan distance 80 does not.
+    assert similarity(a, b, method="overlap", time_samples=times) == 1.0
+    assert similarity(a, b, method="overlap", time_samples=times, dist_method="manhattan") == 0.0

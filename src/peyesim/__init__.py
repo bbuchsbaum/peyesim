@@ -52,8 +52,19 @@ from peyesim.latent_transforms import (
 )
 from peyesim.entropy import fixation_entropy, entropy_from_mass
 from peyesim.repetitive_similarity import repetitive_similarity
-from peyesim.visualization import anim_scanpath, plot_eye_density, plot_fixation_group
+from peyesim.visualization import (
+    anim_scanpath,
+    eyesim_colours,
+    eyesim_density_cmap,
+    eyesim_time_cmap,
+    plot_eye_density,
+    plot_fixation_group,
+    theme_eyesim,
+    theme_eyesim_spatial,
+)
 from peyesim.crqa import crqa
+from peyesim.revisits import RevisitTable, fixation_revisits, revisit_summary
+from peyesim.visual_angle import px_to_visual_angle, visual_angle_to_px
 from peyesim.expansion import estimate_scale, match_scale
 from peyesim.data import available_datasets, data_path, load_dataset
 
@@ -80,6 +91,11 @@ __all__ = [
     "anim_scanpath",
     "plot_eye_density",
     "plot_fixation_group",
+    "eyesim_colours",
+    "eyesim_density_cmap",
+    "eyesim_time_cmap",
+    "theme_eyesim",
+    "theme_eyesim_spatial",
     "eye_density",
     "gen_density",
     "get_density",
@@ -111,6 +127,11 @@ __all__ = [
     "entropy_from_mass",
     "repetitive_similarity",
     "crqa",
+    "fixation_revisits",
+    "revisit_summary",
+    "RevisitTable",
+    "visual_angle_to_px",
+    "px_to_visual_angle",
     "estimate_scale",
     "match_scale",
     "available_datasets",
