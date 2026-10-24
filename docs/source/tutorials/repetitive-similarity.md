@@ -29,7 +29,7 @@ from peyesim.repetitive_similarity import repetitive_similarity
 
 ## Setting up the data
 
-Let's simulate a small dataset: 2 participants view 3 images during encoding
+Let's simulate a small dataset: 8 participants view 3 images during encoding
 and retrieval.
 
 ```python
@@ -48,7 +48,7 @@ def gen_fixations(imname, phase, participant, rng):
     })
 
 rows = []
-for s in ["s1", "s2"]:
+for s in [f"s{i}" for i in range(1, 9)]:
     for p in ["encoding", "retrieval"]:
         for img in ["img1", "img2", "img3"]:
             rows.append(gen_fixations(img, p, s, rng))
@@ -106,7 +106,7 @@ images.
 
 ## Interpreting the results
 
-Each image has four maps (two participants × two phases), so summarise per
+Each image has 16 maps (8 participants × 2 phases), so summarise per
 image before plotting:
 
 ```python
