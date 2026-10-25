@@ -1,5 +1,7 @@
 # peyesim
 
+[![Tests](https://github.com/bbuchsbaum/peyesim/actions/workflows/tests.yml/badge.svg)](https://github.com/bbuchsbaum/peyesim/actions/workflows/tests.yml)
+
 [Documentation](https://bbuchsbaum.github.io/peyesim/) ·
 [API reference](https://bbuchsbaum.github.io/peyesim/reference/) ·
 [Source](https://github.com/bbuchsbaum/peyesim)
@@ -15,13 +17,16 @@ revisitation within a viewing.
 
 ## Installation
 
-peyesim is not on PyPI yet. Install it from GitHub (Python 3.9 or later):
+Python 3.9 or later:
 
 ```bash
-pip install "peyesim @ git+https://github.com/bbuchsbaum/peyesim"
+pip install peyesim
 # with matplotlib for the plotting functions:
-pip install "peyesim[viz] @ git+https://github.com/bbuchsbaum/peyesim"
+pip install "peyesim[viz]"
 ```
+
+The development version installs from GitHub with
+`pip install "peyesim @ git+https://github.com/bbuchsbaum/peyesim"`.
 
 For development, clone the repository and install it in editable mode:
 
@@ -66,6 +71,8 @@ similarity(density(encoding), density(recall), method="pearson")  # 0.89
 similarity(density(encoding), density(other), method="pearson")   # 0.31
 ```
 
+R eyesim gives the same two values, to 16 significant digits.
+
 Maps compared with `similarity()` must share a grid, so give them the same
 bounds and `outdim`.
 
@@ -83,7 +90,7 @@ tutorial is executed when the site is built.
 - [Revisitation](https://bbuchsbaum.github.io/peyesim/tutorials/revisitation/): returns to previously fixated locations, with a spatial null
 - [API reference](https://bbuchsbaum.github.io/peyesim/reference/): every public function and class
 
-The site's source is in [`docs/`](docs/README.md).
+The site's source is in [`docs/`](https://github.com/bbuchsbaum/peyesim/blob/main/docs/README.md).
 
 ## Features
 
@@ -99,14 +106,21 @@ The site's source is in [`docs/`](docs/README.md).
 
 ## Relation to R eyesim
 
-peyesim follows eyesim 0.3.0, except for the experimental GazeWeave models,
-which are not ported. The test suite can compare results against R directly:
-with R, the R packages `pkgload` and `jsonlite`, and an eyesim source checkout,
-the `tests/test_parity_*.py` modules run the same computations in both
-languages. The checkout is found at `eyesim/` (a symlink in this repository)
-or at `$EYESIM_SOURCE_DIR`; without it those tests are skipped.
-[PARITY.md](PARITY.md) lists the remaining known differences.
+peyesim follows eyesim 0.3.0 (commit `9ce29bc`); the experimental GazeWeave
+models are not ported. Every pull request runs the test suite against live R
+eyesim. For every analysis function, fixed fixtures and randomized inputs are
+computed in both languages and compared. Most results agree exactly or to
+floating-point summation error; the few looser tolerances are listed in
+PARITY.md. The bundled datasets are checked to hold R's data bit for bit.
+[PARITY.md](https://github.com/bbuchsbaum/peyesim/blob/main/PARITY.md) describes the checks and lists every known difference.
+The main ones: random permutation subsets cannot reproduce R's random stream;
+EMD is solved exactly where R's `emdist` stops early; and binned `ks` KDE is
+not implemented.
+
+To run the parity tests yourself you need R, the R packages `pkgload` and
+`jsonlite`, and an eyesim source checkout at `eyesim/` or
+`$EYESIM_SOURCE_DIR`. Without these, the tests are skipped.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/bbuchsbaum/peyesim/blob/main/LICENSE).
