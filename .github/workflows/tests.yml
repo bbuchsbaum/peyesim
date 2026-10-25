@@ -117,7 +117,10 @@ jobs:
         with:
           working-directory: eyesim-src
           dependencies: '"hard"'
+          # Suggested packages that eyesim functions under test need
+          # (igraph for multi_match) and that the oracle scripts call.
           extra-packages: |
+            any::igraph
             any::pkgload
             any::jsonlite
             any::crqa
