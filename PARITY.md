@@ -34,6 +34,17 @@ those results. Three kinds of check run there:
   fixation written with `%.17g`). `tools/regenerate_datasets.py` rebuilds the
   JSON copies from R deterministically.
 
+- **Whole analyses on real data.** `test_parity_wynn.py` runs density maps,
+  template similarity (Pearson, Spearman, Fisher z, cosine), time-binned
+  sampling, MultiMatch, revisitation and entropy on a subset of the Wynn data
+  in both languages. A one-off run on the full datasets also matched:
+  - 5,158 per-trial maps were identical;
+  - template similarity over 1,199 trials agreed to 5e-14, with identical
+    `n_perm` and group t statistics to about 1e-14;
+  - MultiMatch over 360 scanpath pairs agreed to 7e-16 (2.5e-8 for the
+    `emdist`-based position metric);
+  - revisitation counts were identical under all three null models.
+
 Tolerances are stated per test. In short: values R computes with the same IEEE
 operations are compared exactly; sums and means agree to 1e-13 relative (R
 accumulates in long double); densities, after both sides round with
@@ -94,7 +105,13 @@ against R:
   two agree to about 1e-9 (`emdist` works in single precision).
 - **Binned ks KDE.** `ks::kde()` bins by default above 500 fixations; peyesim
   always evaluates the exact estimate and raises `NotImplementedError` for
-  `binned=True`.
+  `binned=True`. The binning error grows with the bandwidth. On Wynn maps
+  pooled over trials it peaks at about 1% of the map maximum at sigma 25,
+  0.3% at sigma 50 and 5% at sigma 100. `ks::kde` alone shows the same error,
+  so it is not caused by eyesim. At sigma 100, 60 of 1,199 test trials changed
+  the sign of their match-minus-mismatch difference, although the group t
+  statistic barely moved. Pass `binned = FALSE` in R to get the exact
+  estimate, which matches peyesim exactly.
 - **Component signs.** PCA/CCA scores may differ in sign from R; parity is
   checked through sign-invariant results.
 - **`estimate_scale()`** uses SciPy's L-BFGS-B on a non-smooth objective and

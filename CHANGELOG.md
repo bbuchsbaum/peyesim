@@ -59,6 +59,7 @@ These changed results relative to earlier development snapshots.
   the other method's arguments, as R does.
 - `crqa`: vertical-line measures use the right orientation of the recurrence
   plot, `rENTR` uses crqa's normaliser, and two edge cases match crqa.
+- `load_dataset()` is two to three times faster.
 - The bundled datasets hold R's coordinates exactly (they were rounded to 15
   significant digits); `tools/regenerate_datasets.py` rebuilds them from R.
 
