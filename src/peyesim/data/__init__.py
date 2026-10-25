@@ -35,10 +35,20 @@ def _json_data_path(name: str) -> Path:
     return Path(resources.files(__name__).joinpath(f"{name}.json.gz"))
 
 
+# Column types of R's fixation groups in the bundled data: x, y and group_index
+# are double; index, duration and onset are integer. JSON writes whole-number
+# doubles as integers, so the doubles are restored here.
+_FIXGROUP_FLOAT_COLUMNS = ("x", "y", "group_index")
+
+
 def _fixation_group_from_records(records) -> FixationGroup | None:
     if records is None:
         return None
-    return FixationGroup(pd.DataFrame.from_records(records))
+    frame = pd.DataFrame.from_records(records)
+    for col in _FIXGROUP_FLOAT_COLUMNS:
+        if col in frame:
+            frame[col] = frame[col].astype(float)
+    return FixationGroup(frame)
 
 
 def _load_json_dataset(name: str):

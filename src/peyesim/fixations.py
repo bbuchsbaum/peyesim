@@ -29,9 +29,16 @@ class _FrameBacked:
 
     def __setitem__(self, key, value) -> None:
         if isinstance(key, str):
-            self._frame.loc[:, key] = value
+            # Replace the column: an in-place .loc[:, key] assignment keeps the old
+            # dtype, so centring an integer x column raised TypeError.
+            self._frame[key] = value
         else:
             self._frame.__setitem__(key, value)
+
+    # Not iterable: pandas treats any iterable cell value as a sequence when it
+    # prints a frame, and iterating through ``__getitem__`` raised KeyError(0),
+    # so printing a table with a fixgroup column failed.
+    __iter__ = None
 
     def __array__(self, dtype=None):
         return np.asarray(self._frame, dtype=dtype)
@@ -87,9 +94,13 @@ class FixationGroup(_FrameBacked):
         return self[["x", "y"]].to_numpy()
 
     def center(self, origin: tuple[float, float] | None = None) -> "FixationGroup":
-        """Center fixations around *origin* (default: centroid)."""
+        """Center fixations around *origin* (default: centroid).
+
+        As in R, a missing coordinate makes the centroid (and so every centered
+        value on that axis) missing.
+        """
         if origin is None:
-            origin = (self["x"].mean(), self["y"].mean())
+            origin = (self["x"].mean(skipna=False), self["y"].mean(skipna=False))
         out = self.copy()
         out["x"] = out["x"] - origin[0]
         out["y"] = out["y"] - origin[1]
@@ -118,12 +129,17 @@ class FixationGroup(_FrameBacked):
 
         Each fixation is repeated ``floor(duration * resolution)`` times, and at
         least once. The floor tolerates floating-point error, so a duration of
-        0.29 at resolution 100 gives 29 copies rather than 28.
+        0.29 at resolution 100 gives 29 copies rather than 28. A missing or
+        infinite duration is an error, as in R.
         """
         counts = self["duration"].to_numpy(dtype=float) * resolution
+        if not np.all(np.isfinite(counts)):
+            # R's rep() fails here too ("invalid 'times' argument").
+            raise ValueError("rep_fixations() needs finite durations and resolution; "
+                             "a duration is missing or infinite.")
         tol = np.sqrt(np.finfo(float).eps) * np.maximum(1.0, np.abs(counts))
         nreps = np.floor(counts + tol)
-        nreps = np.where(np.isfinite(nreps) & (nreps >= 1), nreps, 1).astype(int)
+        nreps = np.where(nreps >= 1, nreps, 1).astype(int)
         out = self.to_pandas(copy=False).iloc[np.repeat(np.arange(len(self)), nreps)]
         return FixationGroup(out.reset_index(drop=True))
 
@@ -171,10 +187,10 @@ class FixationGroup(_FrameBacked):
     def summary(self) -> dict:
         """Summary statistics mirroring R's ``summary.fixation_group``."""
         return {
-            "cen_x": self["x"].mean(),
-            "cen_y": self["y"].mean(),
-            "sd_x": self["x"].std(ddof=1),
-            "sd_y": self["y"].std(ddof=1),
+            "cen_x": self["x"].mean(skipna=False),
+            "cen_y": self["y"].mean(skipna=False),
+            "sd_x": self["x"].std(ddof=1, skipna=False),
+            "sd_y": self["y"].std(ddof=1, skipna=False),
             "nfix": len(self),
         }
 
@@ -212,6 +228,8 @@ def fixation_group(
     group: int = 0,
 ) -> FixationGroup:
     """Construct a :class:`FixationGroup`."""
+    if onset is None:
+        raise ValueError("fixation_group() requires onset.")
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
     onset = np.asarray(onset, dtype=float)
@@ -254,7 +272,8 @@ def concat_fixation_groups(*groups: FixationGroup) -> FixationGroup:
     result = groups[0].to_pandas(copy=True)
     for fg in groups[1:]:
         fg_frame = fg.to_pandas(copy=True)
-        offset = result["onset"].max() + result["duration"].iloc[-1]
+        # Like R's max(), a missing onset makes the offset (and all later onsets) missing.
+        offset = result["onset"].max(skipna=False) + result["duration"].iloc[-1]
         fg_frame["onset"] = fg_frame["onset"] + offset
         result = pd.concat([result, fg_frame], ignore_index=True)
 
