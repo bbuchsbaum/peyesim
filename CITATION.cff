@@ -1,0 +1,56 @@
+cff-version: 1.2.0
+message: >-
+  If you use peyesim, please cite it as below. peyesim is a Python port of the
+  R package eyesim; please also cite the methods you use (for example
+  MultiMatch, Dewhurst et al., 2012).
+type: software
+title: "peyesim: analysis of eye-movement data in Python"
+abstract: >-
+  Fixation density maps, template similarity with permutation baselines,
+  MultiMatch scanpath comparison, cross-recurrence analysis and revisitation
+  scoring for eye-movement data. A Python port of the R package eyesim.
+authors:
+  - family-names: Buchsbaum
+    given-names: Bradley
+    email: brad.buchsbaum@gmail.com
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/bbuchsbaum/peyesim"
+url: "https://bbuchsbaum.github.io/peyesim/"
+keywords:
+  - eye tracking
+  - eye movements
+  - scanpath
+  - MultiMatch
+  - gaze reinstatement
+references:
+  - type: software
+    title: "eyesim: Analysis of Eye-Movement Data"
+    authors:
+      - family-names: Buchsbaum
+        given-names: Bradley
+    repository-code: "https://github.com/bbuchsbaum/eyesim"
+    version: 0.3.0
+  - type: article
+    title: >-
+      It depends on how you look at it: Scanpath comparison in multiple
+      dimensions with MultiMatch, a vector-based approach
+    authors:
+      - family-names: Dewhurst
+        given-names: Richard
+      - family-names: Nyström
+        given-names: Marcus
+      - family-names: Jarodzka
+        given-names: Halszka
+      - family-names: Foulsham
+        given-names: Tom
+      - family-names: Johansson
+        given-names: Roger
+      - family-names: Holmqvist
+        given-names: Kenneth
+    journal: Behavior Research Methods
+    volume: 44
+    start: 1079
+    end: 1100
+    year: 2012
+    doi: 10.3758/s13428-012-0212-2

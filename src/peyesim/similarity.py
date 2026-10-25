@@ -101,7 +101,7 @@ def compute_similarity(
     if method == "pearson":
         return float(np.corrcoef(vx, vy)[0, 1])
     elif method == "spearman":
-        return float(spearmanr(vx, vy).statistic)
+        return float(spearmanr(vx, vy)[0])  # `.statistic` needs SciPy >= 1.9
     elif method == "fisherz":
         # Identical maps have r = 1 exactly; corrcoef can return 1 - k * eps.
         r = 1.0 if np.array_equal(vx, vy) else float(np.corrcoef(vx, vy)[0, 1])

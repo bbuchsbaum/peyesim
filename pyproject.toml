@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "peyesim"
 version = "0.1.0"
-description = "Analysis of eye-movement data – Python port of the R eyesim package"
+description = "Fixation density maps, template similarity, MultiMatch and revisitation for eye-movement data; a Python port of the R package eyesim"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
@@ -22,26 +22,39 @@ dependencies = [
     "pot>=0.9",
     "networkx>=2.8",
 ]
+keywords = [
+    "eye tracking", "eye movements", "fixations", "scanpath", "multimatch",
+    "gaze reinstatement", "memory", "density maps", "similarity",
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 
 [project.urls]
 Documentation = "https://bbuchsbaum.github.io/peyesim/"
 Repository = "https://github.com/bbuchsbaum/peyesim"
 Issues = "https://github.com/bbuchsbaum/peyesim/issues"
+Changelog = "https://github.com/bbuchsbaum/peyesim/blob/main/CHANGELOG.md"
+"R package (eyesim)" = "https://github.com/bbuchsbaum/eyesim"
 
 [project.optional-dependencies]
 data = ["pyreadr>=0.5"]
 dev = ["pytest>=7", "pytest-xdist"]
-viz = ["matplotlib>=3.5"]
+viz = ["matplotlib>=3.8"]
 docs = [
     "griffe>=1.14,<2",
-    "matplotlib>=3.5",
+    "matplotlib>=3.8",
 ]
 
 [tool.setuptools.packages.find]

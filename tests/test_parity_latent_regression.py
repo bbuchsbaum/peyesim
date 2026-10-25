@@ -27,11 +27,9 @@ from peyesim import (
     template_similarity,
 )
 from peyesim.density import gen_density
-from tests.r_oracle import as_float, r_unavailable_reason, run_r
+from tests.r_oracle import as_float, requires_r_mark, run_r
 
-pytestmark = pytest.mark.skipif(
-    r_unavailable_reason() is not None, reason="R eyesim oracle unavailable"
-)
+pytestmark = requires_r_mark()
 
 R_CODE = r"""
 make_map <- function(k, shift = 0) {
