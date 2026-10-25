@@ -130,25 +130,25 @@ against R:
 
 These come from bugs in R eyesim or its dependencies found by the randomized
 audit. peyesim returns the value R evidently intends rather than copying the
-bug.
+bug. The linked issues on eyesim give a reproduction and a suggested fix.
 
 - `match_scale()` always errors in R (`pmap` passes the columns through
-  `...`).
+  `...`) ([#42](https://github.com/bbuchsbaum/eyesim/issues/42)).
 - `crqa` with a single embedded point: the crqa package drops a dimension and
-  builds a 2×2 plot.
+  builds a 2×2 plot ([#43](https://github.com/bbuchsbaum/eyesim/issues/43)).
 - Combining fixation groups whose first group is empty gives `-Inf` onsets
-  in R.
+  in R ([#44](https://github.com/bbuchsbaum/eyesim/issues/44)).
 - The fast cosine path for all-zero maps gives 1 only on the `[1, 1]`
-  element.
+  element ([#45](https://github.com/bbuchsbaum/eyesim/issues/45)).
 - `template_similarity(multiscale_aggregation="none")` crashes in
-  `bind_rows` when a row has no map.
-- EMD similarity with a missing permutation template crashes.
+  `bind_rows` when a row has no map ([#46](https://github.com/bbuchsbaum/eyesim/issues/46)).
+- EMD similarity with a missing permutation template crashes ([#47](https://github.com/bbuchsbaum/eyesim/issues/47)).
 - Multiscale permutation baselines are averaged by position, not by sigma, if
-  the maps list their sigmas in different orders.
-- CCA with a missing `fit_by` value errors.
-- MultiMatch duration similarity for two zero-duration scanpaths is 0/0 (NaN)
-  in R and 0 in peyesim.
-- `similarity.scanpath` in R ignores `method`; peyesim honours it.
+  the maps list their sigmas in different orders ([#48](https://github.com/bbuchsbaum/eyesim/issues/48)).
+- CCA with a missing `fit_by` value errors ([#49](https://github.com/bbuchsbaum/eyesim/issues/49)).
+- MultiMatch duration similarity for two zero-duration scanpaths is 0/0 (`NA`)
+  in R and 1 in peyesim, as for any equal durations ([#50](https://github.com/bbuchsbaum/eyesim/issues/50)).
+- `similarity.scanpath` in R ignores `method`; peyesim validates it ([#51](https://github.com/bbuchsbaum/eyesim/issues/51)).
 - R refuses multiscale EMD; peyesim computes it per scale.
 - `sample_density_time()` forwards `NA` values to `aggregate_fun`, and
   `repetitive_similarity(pairwise)` applies `na.omit`, in slightly different
