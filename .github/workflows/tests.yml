@@ -24,8 +24,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python: ["3.10", "3.11", "3.12", "3.13"]
         include:
+          # actions/setup-python has no Python 3.9 build for Ubuntu 26.04
+          # (ubuntu-latest); 24.04 still has one.
+          - os: ubuntu-24.04
+            python: "3.9"
           - os: macos-latest
             python: "3.12"
           - os: windows-latest
@@ -46,7 +50,7 @@ jobs:
 
   minimum-versions:
     name: Oldest supported dependencies (Python 3.9)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # see the Python 3.9 note above
     steps:
       - uses: actions/checkout@v4
 

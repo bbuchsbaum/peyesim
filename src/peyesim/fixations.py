@@ -40,6 +40,11 @@ class _FrameBacked:
     # so printing a table with a fixgroup column failed.
     __iter__ = None
 
+    # pandas recognises DataFrames by their ``_typ`` attribute, which
+    # ``__getattr__`` would otherwise forward from the wrapped frame; pandas
+    # 3.1 then formats a fixgroup cell as a sequence and fails on iter().
+    _typ = None
+
     def __array__(self, dtype=None):
         return np.asarray(self._frame, dtype=dtype)
 
