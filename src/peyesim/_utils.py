@@ -95,13 +95,32 @@ def sinkhorn_distance(D, wx, wy, p: float = 2.0, lam: float = 0.1,
 def match_keys(source_keys, ref_keys):
     """Build match-index list mapping source → reference by key equality.
 
-    Returns a list of (int | None), one per source key.
+    Returns a list of (int | None), one per source key. As R ``match()``,
+    the first reference row wins and a missing key (``None``/``NaN``/``NA``)
+    matches a missing reference key.
     """
     key_to_idx = {}
     for i, k in enumerate(ref_keys):
+        k = _key(k)
         if k not in key_to_idx:
             key_to_idx[k] = i
-    return [key_to_idx.get(sk) for sk in source_keys]
+    return [key_to_idx.get(_key(sk)) for sk in source_keys]
+
+
+_MISSING_KEY = ("__peyesim_missing_key__",)
+
+
+def _key(value):
+    import pandas as pd
+
+    if value is None or value is pd.NA or value is pd.NaT:
+        return _MISSING_KEY
+    try:
+        if np.ndim(value) == 0 and value != value:
+            return _MISSING_KEY
+    except (TypeError, ValueError):
+        pass
+    return value
 
 
 def filter_unmatched(source_tab, matchind, warn_msg=None):

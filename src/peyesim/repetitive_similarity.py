@@ -8,7 +8,7 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
-from peyesim.similarity import LatticeMismatchError, similarity
+from peyesim.similarity import LatticeMismatchError, _DENSITY_METHODS, _match_choice, similarity
 
 
 def repetitive_similarity(
@@ -31,6 +31,7 @@ def repetitive_similarity(
     if condition_var not in tab.columns:
         raise ValueError(f"Condition variable {condition_var} not found in input table.")
 
+    method = _match_choice(method, _DENSITY_METHODS, "method")
     tab = tab.reset_index(drop=True)
     n = len(tab)
     densities = tab[density_var].values
@@ -69,10 +70,16 @@ def repetitive_similarity(
     othersim_vec = np.zeros(n)
     pairwise_list = [None] * n
 
+    # R compares conditions with == and !=, so a missing condition is neither
+    # the same as nor different from any other: it joins neither set.
+    missing = pd.isna(pd.Series(conditions, dtype=object)).to_numpy()
     for i in range(n):
         cond_i = conditions[i]
-        same_idx = [j for j in range(n) if j != i and conditions[j] == cond_i]
-        other_idx = [j for j in range(n) if conditions[j] != cond_i]
+        if missing[i]:
+            same_idx, other_idx = [], []
+        else:
+            same_idx = [j for j in range(n) if j != i and not missing[j] and conditions[j] == cond_i]
+            other_idx = [j for j in range(n) if not missing[j] and conditions[j] != cond_i]
 
         repsim_vals = [sim_matrix[i, j] for j in same_idx]
         othersim_vals = [sim_matrix[i, j] for j in other_idx]
