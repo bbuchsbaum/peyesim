@@ -907,6 +907,25 @@ def _run_similarity_analysis(
     # Detect if method returns dict (e.g. multimatch)
     is_dict_method = method == "multimatch"
 
+    def _common_sigmas(x, y):
+        """The sigmas similarity(x, y) reports per scale, in its order (or None)."""
+        if not (isinstance(x, EyeDensityMultiscale) and isinstance(y, EyeDensityMultiscale)):
+            return None
+        sigmas_y = {sc.sigma for sc in y}
+        return list(dict.fromkeys(sc.sigma for sc in x if sc.sigma in sigmas_y))
+
+    def _align_to_sigmas(ps, ps_sigmas, sigmas):
+        """Reorder one permutation's per-scale scores to ``sigmas``; NaN where absent.
+
+        R averages per-scale permutation scores by position, which mixes scales
+        when templates list their sigmas in different orders.
+        """
+        arr = np.atleast_1d(np.asarray(ps, dtype=float)).ravel()
+        if not ps_sigmas or arr.size != len(ps_sigmas):
+            return np.full(len(sigmas), np.nan)
+        by_sigma = dict(zip(ps_sigmas, arr))
+        return np.array([by_sigma.get(sg, np.nan) for sg in sigmas], dtype=float)
+
     def _perm_mean_vector(sim, psims):
         """R colMeans(rbind(psims), na.rm = TRUE) for per-scale vectors."""
         width = np.size(sim)
@@ -944,6 +963,9 @@ def _run_similarity_analysis(
                              window=window,
                              multiscale_aggregation=multiscale_aggregation, **kwargs)
         is_vector = (not is_dict_method) and np.ndim(sim) > 0
+        true_sigmas = _common_sigmas(d1, d2) if is_vector else None
+        if true_sigmas is not None and len(true_sigmas) != np.size(sim):
+            true_sigmas = None
 
         if permutations > 0:
             if permute_on is not None:
@@ -983,6 +1005,8 @@ def _run_similarity_analysis(
                     ps = similarity(d1p, d2, method=method,
                                     window=window,
                                     multiscale_aggregation=multiscale_aggregation, **kwargs)
+                    if true_sigmas is not None:
+                        ps = _align_to_sigmas(ps, _common_sigmas(d1p, d2), true_sigmas)
                     psims.append(ps)
 
             if is_dict_method:

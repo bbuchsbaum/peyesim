@@ -32,7 +32,9 @@ These changed results relative to earlier development snapshots.
 - Multiscale similarity keeps `x`'s sigma order instead of sorting; invalid
   `multiscale_aggregation` values are refused.
 - `template_similarity(multiscale_aggregation="none")` keeps per-scale
-  `perm_sim` and `eye_sim_diff`.
+  `perm_sim` and `eye_sim_diff`, and averages permutation scores by sigma
+  when templates list their sigmas in different orders or share only some
+  (R averages by position).
 - Missing match keys match each other, as with R's `match()`; missing
   `permute_on` values are no longer pooled into one stratum.
 - Jaccard no longer returns NaN for small values or two zero vectors; the

@@ -303,3 +303,43 @@ def test_scanpath_similarity_table_needs_screensize():
         warnings.simplefilter("ignore")
         with pytest.raises(ValueError, match="screensize"):
             scanpath_similarity(tab, tab, match_on="trial")
+
+
+def test_multiscale_none_permutation_baseline_aligns_scales_by_sigma():
+    # R averages per-scale permutation scores by position, so templates that
+    # list their sigmas in another order, or share only some, mix scales.
+    import warnings
+
+    import pandas as pd
+
+    from peyesim import eye_density, template_similarity
+
+    rng = np.random.default_rng(0)
+    kw = dict(xbounds=(0, 100), ybounds=(0, 100), outdim=(30, 30))
+    groups = [
+        fixation_group(x=rng.uniform(0, 100, 15), y=rng.uniform(0, 100, 15),
+                       duration=np.full(15, 200.0), onset=np.arange(15) * 250.0)
+        for _ in range(4)
+    ]
+    src = [eye_density(g, sigma=[10, 20], **kw) for g in groups]
+    orders = [[20, 10], [10, 20], [10, 20], [10, 30]]
+    ref = [eye_density(g, sigma=o, **kw) for g, o in zip(groups, orders)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        out = template_similarity(
+            pd.DataFrame({"id": range(4), "m": ref}), pd.DataFrame({"id": range(4), "m": src}),
+            match_on="id", refvar="m", sourcevar="m", permutations=10,
+            multiscale_aggregation="none",
+        )
+
+    def per_scale(r, sg):
+        a = next(s for s in ref[r] if s.sigma == sg)
+        b = next(s for s in src[0] if s.sigma == sg)
+        return compute_similarity(a.z.ravel(), b.z.ravel(), method="spearman")
+
+    # Row 0's reference lists sigma 20 first; template 3 has no sigma 20.
+    expected = [np.mean([per_scale(1, 20), per_scale(2, 20)]),
+                np.mean([per_scale(1, 10), per_scale(2, 10), per_scale(3, 10)])]
+    np.testing.assert_allclose(out["perm_sim"].iloc[0], expected, rtol=1e-12)
+    np.testing.assert_allclose(out["eye_sim_diff"].iloc[0], np.asarray(out["eye_sim"].iloc[0]) - expected,
+                               rtol=1e-12)
