@@ -5,12 +5,15 @@ description: "From a list of fixations to a similarity score."
 
 ## Install
 
+peyesim is not on PyPI yet; install it from GitHub (Python 3.9 or later):
+
 ```bash
-pip install peyesim
+pip install "peyesim @ git+https://github.com/bbuchsbaum/peyesim"
 ```
 
-`pip install "peyesim[viz]"` adds matplotlib for the plotting functions. The
-bundled example datasets load without optional dependencies.
+The `viz` extra adds matplotlib for the plotting functions:
+`pip install "peyesim[viz] @ git+https://github.com/bbuchsbaum/peyesim"`.
+The bundled example datasets load without optional dependencies.
 
 ## Fixations, densities, similarity
 

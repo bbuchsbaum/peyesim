@@ -7,9 +7,6 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.optimize import minimize
-from scipy.special import expit
-from sklearn.linear_model import LinearRegression
 
 from peyesim._utils import match_keys, filter_unmatched
 from peyesim.similarity import sample_density
@@ -31,61 +28,154 @@ def _partial_correlation(y: np.ndarray, x: np.ndarray, controls: np.ndarray) -> 
 
 
 def _partial_spearman_two_predictors(y: np.ndarray, baseline: np.ndarray, x2: np.ndarray) -> tuple[float, float]:
-    """Match ppcor::pcor(..., method='spearman') for y, baseline, x2."""
+    """Match ppcor::pcor(..., method='spearman') for y, baseline, x2.
+
+    As ppcor: covariance of average ranks, inverted with ``solve()`` unless its
+    determinant is below machine epsilon (then ``MASS::ginv()``), and
+    ``-cov2cor()`` of the inverse (``NaN`` where a variable has no variance).
+    """
     ranked = np.column_stack([
         stats.rankdata(y, method="average"),
         stats.rankdata(baseline, method="average"),
         stats.rankdata(x2, method="average"),
     ])
-    corr = np.corrcoef(ranked, rowvar=False)
-    inv_corr = np.linalg.pinv(corr)
-    denom = np.sqrt(np.outer(np.diag(inv_corr), np.diag(inv_corr)))
-    partial = np.divide(
-        -inv_corr,
-        denom,
-        out=np.full_like(inv_corr, np.nan, dtype=float),
-        where=denom > np.finfo(float).eps,
-    )
-    np.fill_diagonal(partial, 1.0)
+    if not np.all(np.isfinite(ranked)) or np.isnan(np.column_stack([y, baseline, x2])).any():
+        raise ValueError("missing value where TRUE/FALSE needed")
+    cvx = np.cov(ranked, rowvar=False)
+    if np.linalg.det(cvx) < np.finfo(float).eps:
+        u, sv, vt = np.linalg.svd(cvx)
+        keep = sv > max(np.sqrt(np.finfo(float).eps) * sv[0], 0)
+        icvx = (vt[keep].T / sv[keep]) @ u[:, keep].T
+    else:
+        icvx = np.linalg.inv(cvx)
+    d = np.sqrt(np.diag(icvx))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        partial = -icvx / np.outer(d, d)
     return float(partial[1, 0]), float(partial[2, 0])
 
 
 def _fit_logistic_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept: bool) -> pd.DataFrame:
-    """Fit a binomial GLM with logit link and return broom-style coefficients."""
-    if intercept:
-        design = np.column_stack([np.ones(len(y)), x])
-        out_terms = ["(Intercept)", *terms]
-    else:
-        design = x
-        out_terms = terms
+    """``broom::tidy(glm(..., family = "binomial"))`` via R's ``glm.fit`` IRLS.
 
-    def objective(beta):
-        eta = design @ beta
-        return float(np.sum(np.logaddexp(0.0, eta) - y * eta))
+    Follows ``glm.fit`` step for step (``mustart``, the clamped logit link,
+    the relative deviance test with ``epsilon = 1e-8``, ``maxit = 25``, and
+    ``NA`` for coefficients aliased at the ``Cdqrls`` tolerance 1e-11).
+    """
+    design, out_terms = _design(x, terms, intercept)
+    y = np.asarray(y, dtype=float)
+    n, p = design.shape
+    eps = np.finfo(float).eps
+    thresh = 30.0
 
-    def gradient(beta):
-        eta = design @ beta
-        return design.T @ (expit(eta) - y)
+    def linkinv(eta):
+        return np.where(eta < -thresh, eps, np.where(eta > thresh, 1 - eps, 1.0 / (1.0 + np.exp(-eta))))
 
-    fit = minimize(
-        objective,
-        np.zeros(design.shape[1], dtype=float),
-        jac=gradient,
-        method="BFGS",
-        options={"gtol": 1e-12, "maxiter": 10000},
-    )
-    coef = fit.x
-    p = expit(design @ coef)
-    hess = design.T @ ((p * (1.0 - p))[:, None] * design)
-    cov = np.linalg.pinv(hess)
-    std_error = np.sqrt(np.maximum(np.diag(cov), 0.0))
-    statistic = np.divide(
-        coef,
-        std_error,
-        out=np.full_like(coef, np.nan, dtype=float),
-        where=std_error > np.finfo(float).eps,
-    )
+    def mu_eta(eta):
+        e = np.exp(np.clip(eta, -thresh, thresh))
+        return np.where(np.abs(eta) > thresh, eps, e / (1.0 + e) ** 2)
+
+    def deviance(mu):
+        with np.errstate(divide="ignore", invalid="ignore"):
+            t1 = np.where(y > 0, y * np.log(y / mu), 0.0)
+            t2 = np.where(y < 1, (1 - y) * np.log((1 - y) / (1 - mu)), 0.0)
+        return float(np.sum(2 * (t1 + t2)))
+
+    mu = (y + 0.5) / 2.0
+    eta = np.log(mu / (1 - mu))
+    devold = deviance(mu)
+    coef = np.full(p, np.nan)
+    kept = np.arange(p)
+    wx = design
+    for _ in range(25):
+        me = mu_eta(eta)
+        good = me != 0
+        z = eta[good] + (y - mu)[good] / me[good]
+        w = np.sqrt(me[good] ** 2 / (mu * (1 - mu))[good])
+        wx = design[good] * w[:, None]
+        kept = _r_qr_columns(wx, tol=1e-11)
+        start = np.zeros(p)
+        start[kept] = np.linalg.lstsq(wx[:, kept], z * w, rcond=None)[0]
+        eta = design @ start
+        mu = linkinv(eta)
+        dev = deviance(mu)
+        coef = start
+        if abs(dev - devold) / (abs(dev) + 0.1) < 1e-8:
+            break
+        devold = dev
+    estimate = np.full(p, np.nan)
+    std_error = np.full(p, np.nan)
+    estimate[kept] = coef[kept]
+    if kept.size:
+        _, rmat = np.linalg.qr(wx[:, kept])
+        rinv = np.linalg.inv(np.triu(rmat))
+        std_error[kept] = np.sqrt(np.sum(rinv ** 2, axis=1))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        statistic = estimate / std_error
     p_value = 2 * stats.norm.sf(np.abs(statistic))
+    return pd.DataFrame({
+        "term": out_terms,
+        "estimate": estimate,
+        "std.error": std_error,
+        "statistic": statistic,
+        "p.value": p_value,
+    })
+
+
+def _r_qr_columns(design: np.ndarray, tol: float = 1e-7) -> np.ndarray:
+    """Columns R's ``qr()`` (LINPACK ``dqrdc2``, ``tol = 1e-7``) keeps, in order.
+
+    A column is aliased when what remains of it after projecting out the
+    columns kept before it is below ``tol`` times its original norm; ``lm()``
+    then reports ``NA`` for its coefficient.
+    """
+    kept: list[int] = []
+    for j in range(design.shape[1]):
+        col = design[:, j]
+        norm = np.linalg.norm(col)
+        if norm == 0:
+            continue
+        if kept:
+            basis = design[:, kept]
+            resid = col - basis @ np.linalg.lstsq(basis, col, rcond=None)[0]
+        else:
+            resid = col
+        if np.linalg.norm(resid) >= tol * norm:
+            kept.append(j)
+    return np.asarray(kept, dtype=int)
+
+
+def _design(x: np.ndarray, terms: list[str], intercept: bool):
+    x = np.asarray(x, dtype=float)
+    if x.ndim == 1:
+        x = x[:, None]
+    if intercept:
+        return np.column_stack([np.ones(x.shape[0]), x]), ["(Intercept)", *terms]
+    return x, list(terms)
+
+
+def _fit_lm_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept: bool) -> pd.DataFrame:
+    """``broom::tidy(lm(...))``: aliased terms get ``NA`` like R."""
+    design, out_terms = _design(x, terms, intercept)
+    p = design.shape[1]
+    coef = np.full(p, np.nan)
+    std_error = np.full(p, np.nan)
+    statistic = np.full(p, np.nan)
+    p_value = np.full(p, np.nan)
+    kept = _r_qr_columns(design)
+    if kept.size:
+        xk = design[:, kept]
+        bk = np.linalg.lstsq(xk, y, rcond=None)[0]
+        coef[kept] = bk
+        resid = y - xk @ bk
+        df_resid = len(y) - kept.size
+        if df_resid > 0:
+            sigma2 = float(resid @ resid) / df_resid
+            se = np.sqrt(np.maximum(np.diag(sigma2 * np.linalg.inv(xk.T @ xk)), 0.0))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                tval = bk / se
+            std_error[kept] = se
+            statistic[kept] = tval
+            p_value[kept] = 2 * stats.t.sf(np.abs(tval), df=df_resid)
     return pd.DataFrame({
         "term": out_terms,
         "estimate": coef,
@@ -95,23 +185,66 @@ def _fit_logistic_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept
     })
 
 
-def _fit_rlm_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept: bool) -> pd.DataFrame:
-    """Fit a Huber robust linear model and return broom-style coefficients."""
-    import statsmodels.api as sm
+def _rlm_coefficients(y: np.ndarray, design: np.ndarray, maxit: int = 20,
+                      k: float = 1.345, acc: float = 1e-4) -> dict:
+    """``MASS::rlm.default`` (Huber psi, MAD scale, ``init = "ls"``) step for step."""
+    if _r_qr_columns(design).size < design.shape[1]:
+        raise ValueError("'x' is singular: singular fits are not implemented in 'rlm'")
 
-    if intercept:
-        design = np.column_stack([np.ones(len(y)), x])
-        out_terms = ["(Intercept)", *terms]
-    else:
-        design = x
-        out_terms = terms
-    fit = sm.RLM(y, design, M=sm.robust.norms.HuberT(t=1.345)).fit(maxiter=100)
+    def wfit(w):
+        sw = np.sqrt(w)
+        coef = np.linalg.lstsq(design * sw[:, None], y * sw, rcond=None)[0]
+        return coef, y - design @ coef
+
+    coef, resid = wfit(np.ones(len(y)))
+    scale = np.median(np.abs(resid - np.median(resid))) * 1.4826
+    converged = False
+    for _ in range(maxit):
+        old = resid
+        scale = np.median(np.abs(resid)) / 0.6745
+        if scale == 0:
+            converged = True
+            break
+        u = resid / scale
+        with np.errstate(divide="ignore"):
+            w = np.minimum(1.0, k / np.abs(u))
+        coef, resid = wfit(w)
+        delta = np.sqrt(np.sum((old - resid) ** 2) / max(1e-20, float(np.sum(old ** 2))))
+        if delta <= acc:
+            converged = True
+            break
+    if not converged:
+        warnings.warn(f"'rlm' failed to converge in {maxit} steps")
+    return {"coef": coef, "resid": resid, "scale": scale, "k": k}
+
+
+def _fit_rlm_tidy(y: np.ndarray, x: np.ndarray, terms: list[str], intercept: bool,
+                  maxit: int = 20) -> pd.DataFrame:
+    """``broom::tidy(MASS::rlm(...))``: estimates and ``summary.rlm`` standard errors."""
+    design, out_terms = _design(x, terms, intercept)
+    fit = _rlm_coefficients(y, design, maxit=maxit)
+    coef, resid, s, k = fit["coef"], fit["resid"], fit["scale"], fit["k"]
+    n, p = design.shape
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = resid / s
+        w = np.minimum(1.0, k / np.abs(u))
+    rdf = n - p
+    S = float(np.sum((resid * w) ** 2)) / rdf if rdf > 0 else np.nan
+    psiprime = (np.abs(u) <= k).astype(float)
+    mn = float(np.mean(psiprime))
+    kappa = 1 + p * float(np.var(psiprime, ddof=1)) / (n * mn ** 2) if n > 1 and mn > 0 else np.nan
+    stddev = np.sqrt(S) * (kappa / mn) if mn > 0 else np.nan
+    _, r = np.linalg.qr(design)
+    rinv = np.linalg.solve(np.triu(r[:p, :p]), np.eye(p))
+    rowlen = np.sqrt(np.sum(rinv ** 2, axis=1))
+    std_error = rowlen * stddev
+    with np.errstate(divide="ignore", invalid="ignore"):
+        statistic = coef / std_error
     return pd.DataFrame({
         "term": out_terms,
-        "estimate": np.asarray(fit.params, dtype=float),
-        "std.error": np.asarray(fit.bse, dtype=float),
-        "statistic": np.asarray(fit.tvalues, dtype=float),
-        "p.value": np.asarray(fit.pvalues, dtype=float),
+        "estimate": np.asarray(coef, dtype=float),
+        "std.error": std_error,
+        "statistic": statistic,
     })
 
 
@@ -143,57 +276,25 @@ def template_multireg(
     for i in range(len(source_tab)):
         row = source_tab.iloc[i]
         y_dens = row[response]
-        y_vec = y_dens.z.ravel()
-        y_sum = y_vec.sum()
-        if y_sum > 0:
-            y_vec = y_vec / y_sum
-
-        X_cols = {}
-        for cv in covars:
-            cv_dens = row[cv]
-            cv_vec = cv_dens.z.ravel()
-            cv_sum = cv_vec.sum()
-            if cv_sum > 0:
-                cv_vec = cv_vec / cv_sum
-            X_cols[cv] = cv_vec
-
-        X = np.column_stack([X_cols[cv] for cv in covars])
+        # As R: every map is divided by its sum (a zero or missing sum makes
+        # the whole map missing), then model rows with a missing value are
+        # dropped (na.omit).
+        with np.errstate(divide="ignore", invalid="ignore"):
+            y_vec = np.asarray(y_dens.z, dtype=float).ravel()
+            y_vec = y_vec / y_vec.sum()
+            X = np.column_stack([
+                np.asarray(row[cv].z, dtype=float).ravel() / np.asarray(row[cv].z, dtype=float).sum()
+                for cv in covars
+            ])
+        ok = np.isfinite(y_vec) & np.isfinite(X).all(axis=1)
+        if method != "nnls":
+            if not ok.any():
+                raise ValueError("0 (non-NA) cases")
+            y_vec = y_vec[ok]
+            X = X[ok]
 
         if method == "lm":
-            terms = list(covars)
-            if intercept:
-                design = np.column_stack([np.ones(len(y_vec)), X])
-                terms = ["(Intercept)", *terms]
-            else:
-                design = X
-            coef, *_ = np.linalg.lstsq(design, y_vec, rcond=None)
-            fitted = design @ coef
-            resid = y_vec - fitted
-            df_resid = max(len(y_vec) - design.shape[1], 0)
-            if df_resid > 0:
-                sigma2 = float((resid @ resid) / df_resid)
-                cov = sigma2 * np.linalg.pinv(design.T @ design)
-                std_error = np.sqrt(np.maximum(np.diag(cov), 0.0))
-                statistic = np.divide(
-                    coef,
-                    std_error,
-                    out=np.full_like(coef, np.nan, dtype=float),
-                    where=std_error > np.finfo(float).eps,
-                )
-                p_value = 2 * stats.t.sf(np.abs(statistic), df=df_resid)
-            else:
-                std_error = np.full_like(coef, np.nan, dtype=float)
-                statistic = np.full_like(coef, np.nan, dtype=float)
-                p_value = np.full_like(coef, np.nan, dtype=float)
-            results.append({
-                "multireg": pd.DataFrame({
-                    "term": terms,
-                    "estimate": coef,
-                    "std.error": std_error,
-                    "statistic": statistic,
-                    "p.value": p_value,
-                })
-            })
+            results.append({"multireg": _fit_lm_tidy(y_vec, X, list(covars), intercept=intercept)})
         elif method == "nnls":
             from scipy.optimize import nnls
             coef, _ = nnls(X, y_vec)
@@ -278,15 +379,15 @@ def template_regression(
         baseline_vec = bdens.z.ravel()
         x2_vec = d1.z.ravel()
 
-        if method == "lm":
+        if method in ("lm", "rlm"):
+            # lm()/rlm() drop rows with a missing value (na.omit)
             X = np.column_stack([baseline_vec, x2_vec])
-            model = LinearRegression(fit_intercept=True)
-            model.fit(X, y_vec)
-            b0_list.append(model.coef_[0])
-            b1_list.append(model.coef_[1])
-        elif method == "rlm":
-            X = np.column_stack([baseline_vec, x2_vec])
-            fit = _fit_rlm_tidy(y_vec, X, ["baseline", "x2"], intercept=True)
+            ok = ~(np.isnan(y_vec) | np.isnan(X).any(axis=1))
+            if method == "lm":
+                fit = _fit_lm_tidy(y_vec[ok], X[ok], ["baseline", "x2"], intercept=True)
+            else:
+                fit = _fit_rlm_tidy(y_vec[ok], X[ok], ["baseline", "x2"], intercept=True,
+                                    maxit=100)
             estimates = fit.set_index("term")["estimate"]
             b0_list.append(estimates["baseline"])
             b1_list.append(estimates["x2"])

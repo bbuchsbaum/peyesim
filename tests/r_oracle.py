@@ -14,7 +14,9 @@ the JSON it prints against peyesim::
         return run_r(R_CODE)
 
 The script runs after ``pkgload::load_all()`` of the R source tree, which is
-``$EYESIM_SOURCE_DIR`` when set and ``<repo>/eyesim`` otherwise. It must assign
+``$EYESIM_SOURCE_DIR`` when set and ``<repo>/eyesim`` otherwise. Set
+``PEYESIM_REQUIRE_R=1`` (as the R-parity CI job does) to turn every such skip
+into a failure, so a broken R setup cannot pass by skipping the parity tests. It must assign
 a list to ``out``; that list is serialised with ``jsonlite::toJSON`` (data frames
 by column, ``NA`` as ``null``, 15 significant digits). Tests are skipped when
 ``Rscript``, ``pkgload``/``jsonlite`` or the R source tree are unavailable.
@@ -69,21 +71,37 @@ def r_unavailable_reason() -> str | None:
     return None
 
 
+def _r_required() -> bool:
+    return os.environ.get("PEYESIM_REQUIRE_R", "") not in ("", "0")
+
+
 class _RequiresR:
     """``@requires_r`` marker that probes R lazily, at the first decorated test."""
 
     def __call__(self, obj):
         reason = r_unavailable_reason()
+        if reason is not None and _r_required():
+            raise RuntimeError(f"PEYESIM_REQUIRE_R is set but {reason}")
         return pytest.mark.skipif(reason is not None, reason=reason or "")(obj)
 
 
 requires_r = _RequiresR()
 
 
+def requires_r_mark():
+    """``requires_r`` as a module-level ``pytestmark``."""
+    reason = r_unavailable_reason()
+    if reason is not None and _r_required():
+        raise RuntimeError(f"PEYESIM_REQUIRE_R is set but {reason}")
+    return pytest.mark.skipif(reason is not None, reason=reason or "")
+
+
 def run_r(code: str) -> dict:
     """Run ``code`` against R eyesim and return the parsed ``out`` list."""
     reason = r_unavailable_reason()
     if reason is not None:
+        if _r_required():
+            pytest.fail(f"PEYESIM_REQUIRE_R is set but {reason}")
         pytest.skip(reason)
     env = dict(os.environ, EYESIM_SOURCE_DIR=str(eyesim_source_dir()))
     with tempfile.NamedTemporaryFile("w", suffix=".R", delete=False) as handle:

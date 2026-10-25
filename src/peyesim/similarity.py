@@ -23,17 +23,38 @@ from peyesim.saccades import Scanpath
 # Core compute_similarity
 # ---------------------------------------------------------------------------
 
+_DENSITY_METHODS = ("pearson", "spearman", "fisherz", "cosine", "l1", "jaccard", "dcov", "emd")
+
+
+def _match_choice(value, choices, label: str = "arg") -> str:
+    """R ``match.arg()`` for a single string: exact or unique-prefix match."""
+    if value is None:
+        return choices[0]
+    if isinstance(value, (list, tuple)):
+        if list(value) == list(choices):
+            return choices[0]
+        raise ValueError(f"'{label}' must be of length 1")
+    if value in choices:
+        return value
+    hits = [c for c in choices if isinstance(value, str) and value and c.startswith(value)]
+    if len(hits) == 1:
+        return hits[0]
+    raise ValueError(f"'{label}' should be one of {', '.join(repr(c) for c in choices)}")
+
+
 def compute_similarity(
     x,
     y,
-    method: str = "spearman",
+    method: str = "pearson",
     saliency_map=None,
 ) -> float:
     """Compute similarity between two vectors / density objects.
 
-    Supported methods: pearson, spearman, fisherz, cosine, l1, jaccard, dcov, emd.
+    Supported methods: pearson (default, as in R), spearman, fisherz, cosine,
+    l1, jaccard, dcov, emd.
     """
-    method = method.lower()
+    method = method.lower() if isinstance(method, str) else method
+    method = _match_choice(method, _DENSITY_METHODS, "method")
 
     # EMD path – needs full density objects
     if method == "emd":
@@ -101,7 +122,7 @@ def compute_similarity(
     if method == "pearson":
         return float(np.corrcoef(vx, vy)[0, 1])
     elif method == "spearman":
-        return float(spearmanr(vx, vy).statistic)
+        return float(spearmanr(vx, vy)[0])  # `.statistic` needs SciPy >= 1.9
     elif method == "fisherz":
         # Identical maps have r = 1 exactly; corrcoef can return 1 - k * eps.
         r = 1.0 if np.array_equal(vx, vy) else float(np.corrcoef(vx, vy)[0, 1])
@@ -115,10 +136,12 @@ def compute_similarity(
         r = np.clip(r, -1 + eps, 1 - eps)
         return float(np.arctanh(r))
     elif method == "cosine":
+        # proxy::simil(method = "cosine"): xy / sqrt(xx * yy), with an
+        # all-zero pair counting as identical (1) and one zero vector as 0.
         nx = np.linalg.norm(vx)
         ny = np.linalg.norm(vy)
-        if nx <= eps or ny <= eps:
-            return 1.0 if nx <= eps and ny <= eps else 0.0
+        if nx == 0 or ny == 0:
+            return 1.0 if nx == 0 and ny == 0 else 0.0
         d = _cosine_dist(vx, vy)
         return 1.0 - d
     elif method == "l1":
@@ -134,10 +157,11 @@ def compute_similarity(
         return 1.0 - 0.5 * np.abs(x1 - x2).sum()
     elif method == "jaccard":
         # Extended (Tanimoto) Jaccard, as proxy's "eJaccard" in R eyesim.
+        # proxy gives 1 when the denominator vanishes (both vectors zero).
         xy = float(np.dot(vx, vy))
         den = float(np.dot(vx, vx) + np.dot(vy, vy) - xy)
-        if den <= eps:
-            return np.nan
+        if den == 0:
+            return 1.0
         return xy / den
     elif method == "dcov":
         sx = vx.sum()
@@ -299,14 +323,21 @@ def _check_same_density_lattice(x, y) -> None:
 # Dispatching similarity function
 # ---------------------------------------------------------------------------
 
-def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
-    """Compute similarity, dispatching on type (mirrors R S3 ``similarity``)."""
+def similarity(x, y, method: str | None = None, **kwargs) -> float | np.ndarray:
+    """Compute similarity, dispatching on type (mirrors R S3 ``similarity``).
+
+    ``method`` defaults as in R: ``"pearson"`` for density maps (single or
+    multiscale) and numeric vectors, ``"sinkhorn"`` for fixation groups and
+    ``"multimatch"`` for scanpaths (which require ``screensize``).
+    """
     multiscale_aggregation = kwargs.pop("multiscale_aggregation", "mean")
     saliency_map = kwargs.pop("saliency_map", None)
     window = kwargs.pop("window", None)
 
     # Multiscale
     if isinstance(x, EyeDensityMultiscale):
+        if method is None:
+            method = "pearson"
         if not isinstance(y, EyeDensityMultiscale):
             raise TypeError("y must also be EyeDensityMultiscale")
         if len(x) == 0 or len(y) == 0:
@@ -315,13 +346,23 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
 
         sigmas_x = [s.sigma for s in x]
         sigmas_y = [s.sigma for s in y]
-        common = sorted(set(sigmas_x) & set(sigmas_y))
+        # R intersect(): x's order, without duplicates
+        common = list(dict.fromkeys(sg for sg in sigmas_x if sg in sigmas_y))
         if not common:
-            warnings.warn("No common sigmas found between multiscale objects.")
+            warnings.warn("No common sigmas found between multiscale objects. Cannot compute similarity.")
             return np.nan
+        if len(common) < len(sigmas_x) or len(common) < len(sigmas_y):
+            warnings.warn(
+                "Not all sigmas matched between multiscale objects. Comparing only common sigmas: "
+                + ", ".join(str(sg) for sg in common)
+            )
 
-        sx_map = {s.sigma: s for s in x}
-        sy_map = {s.sigma: s for s in y}
+        sx_map = {}
+        for sc in x:
+            sx_map.setdefault(sc.sigma, sc)
+        sy_map = {}
+        for sc in y:
+            sy_map.setdefault(sc.sigma, sc)
         # Mismatched lattices are an input error, not a per-scale numerical
         # failure, so check them before the per-scale handler below.
         for sig in common:
@@ -340,13 +381,16 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
         if np.all(np.isnan(per_scale)):
             return np.nan
 
-        if multiscale_aggregation == "mean":
+        agg = _match_choice(str(multiscale_aggregation).lower(), ("mean", "none"),
+                            "multiscale_aggregation")
+        if agg == "mean":
             return float(np.nanmean(per_scale))
-        else:
-            return per_scale
+        return per_scale
 
     # EyeDensity
     if isinstance(x, EyeDensity):
+        if method is None:
+            method = "pearson"
         if isinstance(y, EyeDensity):
             _check_same_density_lattice(x, y)
         elif y is not None and np.size(y) != np.size(x.z):
@@ -367,23 +411,37 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
             if len(y) == 0:
                 warnings.warn("no observations in 'y'")
                 return np.nan
+        if method is None:
+            method = "multimatch"
         if method == "multimatch":
             from peyesim.multimatch import multi_match
-            screensize = kwargs.pop("screensize", (1024, 768))
-            return multi_match(x, y, screensize=screensize)
-        # Fall through to fixation-level methods
-
-    # FixationGroup
-    if isinstance(x, FixationGroup) and isinstance(y, FixationGroup):
-        if window is not None:
-            x = _filter_fixation_window(x, window)
-            y = _filter_fixation_window(y, window)
             if len(x) == 0:
                 warnings.warn("no observations in 'x'")
                 return np.nan
             if len(y) == 0:
                 warnings.warn("no observations in 'y'")
                 return np.nan
+            screensize = kwargs.pop("screensize", None)
+            if screensize is None:
+                raise ValueError(
+                    "method `multi_match` requires a `screensize` argument (e.g. (1000, 1000))"
+                )
+            return multi_match(x, y, screensize=screensize)
+        # Fall through to fixation-level methods
+
+    # FixationGroup
+    if isinstance(x, FixationGroup) and isinstance(y, FixationGroup):
+        if method is None:
+            method = "sinkhorn"
+        if window is not None:
+            x = _filter_fixation_window(x, window)
+            y = _filter_fixation_window(y, window)
+        if len(x) == 0:
+            warnings.warn("no observations in 'x'")
+            return np.nan
+        if len(y) == 0:
+            warnings.warn("no observations in 'y'")
+            return np.nan
         if method == "overlap":
             from peyesim.overlap import fixation_overlap
             time_samples = kwargs.get("time_samples")
@@ -421,7 +479,8 @@ def similarity(x, y, method: str = "spearman", **kwargs) -> float | np.ndarray:
             raise ValueError("method for fixation groups must be one of {'sinkhorn', 'overlap'}")
 
     # Default: numeric vectors
-    return compute_similarity(x, y, method=method, saliency_map=saliency_map)
+    return compute_similarity(x, y, method="pearson" if method is None else method,
+                              saliency_map=saliency_map)
 
 
 def _filter_fixation_window(x: FixationGroup, window) -> FixationGroup:
@@ -695,6 +754,84 @@ def sample_density_time(
     return out
 
 
+def _fast_cosine_vector(obj):
+    if isinstance(obj, EyeDensity):
+        return np.asarray(obj.z, dtype=float).ravel(order="F")
+    if obj is None or isinstance(obj, (EyeDensityMultiscale, FixationGroup, str, bytes, dict)):
+        return None
+    try:
+        arr = np.asarray(obj)
+    except Exception:
+        return None
+    if arr.dtype.kind not in "biuf":
+        return None
+    return arr.astype(float).ravel(order="F")
+
+
+def _fast_cosine_eligible(objs) -> bool:
+    """When R ``template_similarity(method = "cosine")`` takes its vectorised path.
+
+    R uses it when every reference and source map is a density or numeric
+    vector of one length with no missing cell and all densities share a
+    lattice; that path scores every pair, even a single-cell one.
+    """
+    vecs = [_fast_cosine_vector(o) for o in objs]
+    if any(v is None for v in vecs) or len({v.size for v in vecs}) != 1:
+        return False
+    if any(np.isnan(v).any() for v in vecs):
+        return False
+    dens = [o for o in objs if isinstance(o, EyeDensity)]
+    return all(_density_lattices_equal(dens[0], d) for d in dens[1:])
+
+
+def _fast_cosine(src, ref) -> float:
+    """R ``cosine_similarity_matrix()`` for one pair (source row, reference row).
+
+    A product of norms at or below machine epsilon scores 0, and two zero
+    vectors score 1. (R intends 1 for every pair of zero maps but, because
+    ``outer()`` of two logical vectors is numeric, only sets element [1, 1].)
+    """
+    x = _fast_cosine_vector(src)
+    y = _fast_cosine_vector(ref)
+    eps = np.finfo(float).eps
+    nx, ny = np.sqrt(np.sum(x ** 2)), np.sqrt(np.sum(y ** 2))
+    if nx <= eps and ny <= eps:
+        return 1.0
+    denom = nx * ny
+    if denom <= eps:
+        return 0.0
+    return float(np.dot(x, y) / denom)
+
+
+def _stratum_key(value):
+    """Key of a ``permute_on`` stratum; ``None`` for a missing value (R ``split()`` drops NA)."""
+    try:
+        if value is None or (np.ndim(value) == 0 and pd.isna(value)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(value)
+
+
+def _is_valid_similarity_obj(obj) -> bool:
+    """R ``is_valid_similarity_obj()``: a density, fixation group or numeric input."""
+    if obj is None:
+        return False
+    if isinstance(obj, (EyeDensity, EyeDensityMultiscale, FixationGroup)):
+        return True
+    if isinstance(obj, (str, bytes, dict)):
+        return False
+    if np.ndim(obj) == 0:
+        try:
+            return not pd.isna(obj) and np.isreal(obj)
+        except (TypeError, ValueError):
+            return False
+    try:
+        return np.asarray(obj).dtype.kind in "biuf"
+    except Exception:
+        return False
+
+
 # ---------------------------------------------------------------------------
 # run_similarity_analysis (internal)
 # ---------------------------------------------------------------------------
@@ -734,20 +871,30 @@ def _run_similarity_analysis(
         warn_msg="did not find matching template map for all source maps. Removing non-matching elements.",
     )
 
-    # Setup permutation splits
+    # Setup permutation splits. As R's split(), rows whose stratum is missing
+    # belong to no stratum and so have no permutation candidates.
     match_split = None
+    if permute_on is not None:
+        if permute_on not in source_tab.columns or permute_on not in ref_tab.columns:
+            raise ValueError(f"permute_on column {permute_on} must exist in ref_tab and source_tab")
     if permute_on is not None and permutations > 0:
         match_split = {}
         for i, mi in enumerate(matchind):
-            key = str(source_tab[permute_on].iloc[i])
-            if key not in match_split:
-                match_split[key] = []
-            match_split[key].append(mi)
+            key = _stratum_key(source_tab[permute_on].iloc[i])
+            if key is None:
+                continue
+            match_split.setdefault(key, []).append(mi)
 
     eye_sim_list = []
     perm_sim_list = []
     diff_list = []
     n_perm_list = []
+
+    fast_cosine = (
+        method == "cosine" and window is None and not kwargs
+        and multiscale_aggregation == "mean" and len(source_tab) > 0
+        and _fast_cosine_eligible(list(ref_tab[refvar].values) + list(source_tab[sourcevar].values))
+    )
 
     def _sample(candidates, size):
         if rng is None:
@@ -760,11 +907,44 @@ def _run_similarity_analysis(
     # Detect if method returns dict (e.g. multimatch)
     is_dict_method = method == "multimatch"
 
+    def _common_sigmas(x, y):
+        """The sigmas similarity(x, y) reports per scale, in its order (or None)."""
+        if not (isinstance(x, EyeDensityMultiscale) and isinstance(y, EyeDensityMultiscale)):
+            return None
+        sigmas_y = {sc.sigma for sc in y}
+        return list(dict.fromkeys(sc.sigma for sc in x if sc.sigma in sigmas_y))
+
+    def _align_to_sigmas(ps, ps_sigmas, sigmas):
+        """Reorder one permutation's per-scale scores to ``sigmas``; NaN where absent.
+
+        R averages per-scale permutation scores by position, which mixes scales
+        when templates list their sigmas in different orders.
+        """
+        arr = np.atleast_1d(np.asarray(ps, dtype=float)).ravel()
+        if not ps_sigmas or arr.size != len(ps_sigmas):
+            return np.full(len(sigmas), np.nan)
+        by_sigma = dict(zip(ps_sigmas, arr))
+        return np.array([by_sigma.get(sg, np.nan) for sg in sigmas], dtype=float)
+
+    def _perm_mean_vector(sim, psims):
+        """R colMeans(rbind(psims), na.rm = TRUE) for per-scale vectors."""
+        width = np.size(sim)
+        rows = []
+        for ps in psims:
+            arr = np.atleast_1d(np.asarray(ps, dtype=float)).ravel()
+            if arr.size == 1 and width != 1:
+                arr = np.repeat(arr, width)
+            rows.append(arr)
+        mat = np.vstack(rows)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            return np.nanmean(mat, axis=0)
+
     for i, mi in enumerate(matchind):
         d1 = ref_data[mi]
         d2 = src_data[i]
 
-        if d1 is None or d2 is None:
+        if not _is_valid_similarity_obj(d1) or not _is_valid_similarity_obj(d2):
             warnings.warn(
                 "Invalid or NULL similarity input encountered in run_similarity_analysis(). "
                 "Returning NA for this comparison."
@@ -776,14 +956,21 @@ def _run_similarity_analysis(
                 n_perm_list.append(0)
             continue
 
-        sim = similarity(d1, d2, method=method,
-                         window=window,
-                         multiscale_aggregation=multiscale_aggregation, **kwargs)
+        if fast_cosine:
+            sim = _fast_cosine(d2, d1)
+        else:
+            sim = similarity(d1, d2, method=method,
+                             window=window,
+                             multiscale_aggregation=multiscale_aggregation, **kwargs)
+        is_vector = (not is_dict_method) and np.ndim(sim) > 0
+        true_sigmas = _common_sigmas(d1, d2) if is_vector else None
+        if true_sigmas is not None and len(true_sigmas) != np.size(sim):
+            true_sigmas = None
 
         if permutations > 0:
             if permute_on is not None:
-                pkey = str(source_tab[permute_on].iloc[i])
-                mind = list(match_split.get(pkey, []))
+                pkey = _stratum_key(source_tab[permute_on].iloc[i])
+                mind = list(match_split.get(pkey, [])) if pkey is not None else []
             else:
                 mind = list(matchind)
 
@@ -797,20 +984,29 @@ def _run_similarity_analysis(
             if len(mind) == 0:
                 warnings.warn("no matching candidate indices for permutation test. Skipping.")
                 eye_sim_list.append(sim)
-                perm_sim_list.append(np.nan if not is_dict_method else None)
-                diff_list.append(np.nan if not is_dict_method else None)
+                if is_vector:
+                    nan_vec = np.full(np.shape(sim), np.nan)
+                    perm_sim_list.append(nan_vec)
+                    diff_list.append(nan_vec.copy())
+                else:
+                    perm_sim_list.append(np.nan if not is_dict_method else None)
+                    diff_list.append(np.nan if not is_dict_method else None)
                 n_perm_list.append(0)
                 continue
 
             psims = []
             for j in mind:
                 d1p = ref_data[j]
-                if d1p is None:
+                if fast_cosine:
+                    psims.append(_fast_cosine(d2, d1p))
+                elif not _is_valid_similarity_obj(d1p):
                     psims.append(np.nan if not is_dict_method else None)
                 else:
                     ps = similarity(d1p, d2, method=method,
                                     window=window,
                                     multiscale_aggregation=multiscale_aggregation, **kwargs)
+                    if true_sigmas is not None:
+                        ps = _align_to_sigmas(ps, _common_sigmas(d1p, d2), true_sigmas)
                     psims.append(ps)
 
             if is_dict_method:
@@ -820,8 +1016,10 @@ def _run_similarity_analysis(
                     perm_mean = {k: mean_or_nan([p[k] for p in valid_psims]) for k in valid_psims[0]}
                 else:
                     perm_mean = None
+            elif is_vector:
+                perm_mean = _perm_mean_vector(sim, psims)
             else:
-                perm_mean = mean_or_nan(psims)
+                perm_mean = mean_or_nan([np.nanmean(p) if np.ndim(p) > 0 else p for p in psims])
 
             eye_sim_list.append(sim)
             perm_sim_list.append(perm_mean)
@@ -833,10 +1031,8 @@ def _run_similarity_analysis(
                 else:
                     diff_list.append(None)
             else:
-                if np.isscalar(sim):
-                    diff_list.append(sim - perm_mean)
-                else:
-                    diff_list.append(np.nanmean(sim) - perm_mean if not np.isnan(perm_mean) else np.nan)
+                diff_list.append(np.asarray(sim, dtype=float) - perm_mean if is_vector
+                                 else sim - perm_mean)
         else:
             eye_sim_list.append(sim)
 
@@ -890,7 +1086,10 @@ def template_similarity(
     **kwargs,
 ) -> pd.DataFrame:
     """Template-based similarity analysis (mirrors R ``template_similarity``)."""
+    method = _match_choice(method, _DENSITY_METHODS, "method")
     if similarity_transform is not None:
+        from peyesim.latent_transforms import _resolve_similarity_transform
+        similarity_transform = _resolve_similarity_transform(similarity_transform)
         if similarity_transform_args is None:
             similarity_transform_args = {}
         transform_res = similarity_transform(
@@ -913,6 +1112,11 @@ def template_similarity(
     )
 
 
+def _check_window(window) -> None:
+    if window is not None and not (len(window) >= 2 and window[1] > window[0]):
+        raise ValueError("window[1] must be greater than window[0]")
+
+
 def fixation_similarity(
     ref_tab: pd.DataFrame,
     source_tab: pd.DataFrame,
@@ -926,6 +1130,8 @@ def fixation_similarity(
     **kwargs,
 ) -> pd.DataFrame:
     """Compute fixation-level similarity (mirrors R ``fixation_similarity``)."""
+    _check_window(window)
+    method = _match_choice(method, ("sinkhorn", "overlap"), "method")
     return _run_similarity_analysis(
         ref_tab, source_tab, match_on, permutations, permute_on,
         method, refvar, sourcevar, window=window, **kwargs
@@ -944,7 +1150,11 @@ def scanpath_similarity(
     window=None,
     **kwargs,
 ) -> pd.DataFrame:
-    """Compute scanpath similarity (mirrors R ``scanpath_similarity``)."""
+    """Compute scanpath similarity (mirrors R ``scanpath_similarity``).
+
+    ``screensize`` (width, height) must be passed through ``**kwargs``, as in R.
+    """
+    _check_window(window)
     return _run_similarity_analysis(
         ref_tab, source_tab, match_on, permutations, permute_on,
         method, refvar, sourcevar, window=window, **kwargs
@@ -1013,11 +1223,16 @@ def _make_cv_folds(
 
     # Build a group key per row. R uses interaction(..., lex.order=TRUE,
     # sep="::"), coerces to character, sorts levels, then samples groups.
+    if len(split_on) == 0 or not all(col in source_tab.columns for col in split_on):
+        raise ValueError("split_on must name one or more columns in source_tab.")
+    # A missing value in any split column gives R an NA key: such rows join no
+    # group and no fold, so they are neither scored nor used for fitting.
+    missing = source_tab[split_on].isna().any(axis=1).to_numpy()
     group_keys = source_tab[split_on].apply(
         lambda row: "::".join(_format_split_value(value) for value in row),
         axis=1,
     )
-    unique_groups = sorted(group_keys.unique())
+    unique_groups = sorted(group_keys[~missing].unique())
 
     if len(unique_groups) < 2:
         raise ValueError(
@@ -1041,7 +1256,8 @@ def _make_cv_folds(
     for rank, idx in enumerate(order):
         group_to_fold[unique_groups[idx]] = (rank % n_folds) + 1
 
-    fold_ids = np.array([group_to_fold[g] for g in group_keys], dtype=int)
+    fold_ids = np.array([0 if miss else group_to_fold[g] for g, miss in zip(group_keys, missing)],
+                        dtype=int)
     return {"fold_ids": fold_ids, "n_folds": n_folds}
 
 
@@ -1106,6 +1322,10 @@ def template_similarity_cv(
     """
     if similarity_transform_args is None:
         similarity_transform_args = {}
+    method = _match_choice(method, _DENSITY_METHODS, "method")
+    if similarity_transform is not None:
+        from peyesim.latent_transforms import _resolve_similarity_transform
+        similarity_transform = _resolve_similarity_transform(similarity_transform)
 
     if split_on is None:
         split_on = match_on
@@ -1130,6 +1350,14 @@ def template_similarity_cv(
             eval_mask = np.asarray(eval_source_filter, dtype=bool)
     else:
         eval_mask = np.ones(len(source_tab), dtype=bool)
+    for label, mask in (("fit_source_filter", fit_mask), ("eval_source_filter", eval_mask)):
+        if mask.shape != (len(source_tab),):
+            raise ValueError(
+                f"{label} must be None, a boolean vector of length len(source_tab), "
+                "or a function returning one."
+            )
+    if not eval_mask.any():
+        raise ValueError("eval_source_filter did not select any source rows.")
 
     # Build folds
     cv = _make_cv_folds(source_tab, split_on, n_folds=n_folds, seed=seed)
@@ -1150,7 +1378,7 @@ def template_similarity_cv(
             continue
 
         # Training candidate rows: NOT in this fold AND pass fit_mask
-        train_rows = (~in_fold) & fit_mask
+        train_rows = (~in_fold) & (fold_ids > 0) & fit_mask
 
         # Remove from training any rows whose match_on key appears in eval
         # set to prevent data leakage

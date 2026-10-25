@@ -7,7 +7,6 @@ import warnings
 import numpy as np
 import pandas as pd
 from scipy.interpolate import RegularGridInterpolator
-from sklearn.decomposition import PCA
 
 from peyesim.density import EyeDensity, EyeDensityMultiscale, _zapsmall
 
@@ -23,9 +22,61 @@ def _vectorize_density(obj) -> np.ndarray:
             )
         obj = obj[0]
     if isinstance(obj, EyeDensity):
-        return obj.z.ravel()
-    arr = np.asarray(obj)
-    return arr.ravel()
+        return np.asarray(obj.z, dtype=float).ravel()
+    if obj is not None and not isinstance(obj, (str, bytes, dict)):
+        arr = np.asarray(obj)
+        if arr.dtype.kind in "biuf":
+            return arr.astype(float).ravel()
+    raise ValueError("Unsupported object passed to latent transform; expected density or numeric.")
+
+
+def _vectorize_density_tab(tab, var, expected_len=None) -> np.ndarray:
+    """R ``vectorize_density_tab()``: one row per density, equal lengths."""
+    vecs = [_vectorize_density(d) for d in tab[var]]
+    if not vecs:
+        return np.zeros((0, 0 if expected_len is None else expected_len))
+    lens = {len(v) for v in vecs}
+    if len(lens) != 1:
+        raise ValueError("All density vectors must share the same length for latent transforms.")
+    if expected_len is not None and lens.pop() != expected_len:
+        raise ValueError("Density vectors must match the transform training dimensionality.")
+    return np.vstack(vecs)
+
+
+class _Prcomp:
+    """``stats::prcomp(x, center, scale., rank.)``: centring/scaling and rotation."""
+
+    def __init__(self, combined: np.ndarray, comps: int, center: bool, scale: bool):
+        x = np.asarray(combined, dtype=float)
+        n, p = x.shape
+        self.center = x.mean(axis=0) if center else None
+        xc = x - self.center if center else x
+        if scale:
+            # base::scale(): sd when centred, root mean square / (n - 1) otherwise
+            sc = np.sqrt(np.sum(xc ** 2, axis=0) / max(n - 1, 1))
+            if np.any(~np.isfinite(sc)) or np.any(sc == 0):
+                raise ValueError("cannot rescale a constant/zero column to unit variance")
+            self.scale = sc
+            xc = xc / sc
+        else:
+            self.scale = None
+        if not np.all(np.isfinite(xc)):
+            raise ValueError("infinite or missing values in 'x'")
+        rank = min(comps, n, p)
+        _, _, vt = np.linalg.svd(xc, full_matrices=False)
+        self.rotation = vt[:rank].T
+        self.k = min(comps, self.rotation.shape[1])
+        self.input_dim = p
+
+    def transform(self, mat: np.ndarray) -> np.ndarray:
+        mat = np.asarray(mat, dtype=float)
+        if mat.shape[0] == 0:
+            return np.zeros((0, self.k))
+        if self.center is not None:
+            mat = mat - self.center
+        if self.scale is not None:
+            mat = mat / self.scale
+        return mat @ self.rotation[:, :self.k]
 
 
 def _split_rows(mat: np.ndarray) -> list[np.ndarray]:
@@ -72,47 +123,62 @@ def _transform_group_keys(
         raise ValueError("fit_by columns must exist in both ref_tab and source_tab for grouped latent transforms.")
 
     def make_keys(tab: pd.DataFrame) -> np.ndarray:
-        return tab.loc[:, fit_by].astype(str).agg("::".join, axis=1).to_numpy(dtype=str)
+        sub = tab.loc[:, fit_by]
+        keys = np.array(["::".join(str(v) for v in row) for row in sub.itertuples(index=False)],
+                        dtype=object)
+        # As R interaction(): a missing value gives an NA key, which matches
+        # no stratum, so those rows are never fitted (and keep their input).
+        missing = tab.loc[:, fit_by].isna().any(axis=1).to_numpy()
+        keys[missing] = _NA_GROUP
+        return keys
 
     return make_keys(ref_tab), make_keys(source_tab)
 
 
+class _NAGroup:
+    """Missing ``fit_by`` key: compares unequal to everything, itself included."""
+
+    def __eq__(self, other):
+        return False
+
+    def __ne__(self, other):
+        return True
+
+    def __hash__(self):
+        return 0
+
+    def __repr__(self):
+        return "NA"
+
+
+_NA_GROUP = _NAGroup()
+
+
+def _resolve_similarity_transform(similarity_transform):
+    """R ``resolve_similarity_transform_function()``: a function or its name."""
+    if callable(similarity_transform):
+        return similarity_transform
+    if isinstance(similarity_transform, str):
+        import peyesim
+        import peyesim.latent_transforms as lt
+
+        fn = getattr(lt, similarity_transform, None) or getattr(peyesim, similarity_transform, None)
+        if callable(fn):
+            return fn
+        raise ValueError(f"object '{similarity_transform}' of mode 'function' was not found")
+    raise ValueError("similarity_transform must be a function or a single function name.")
+
+
 def _latent_pca_projection(ref_tab, source_tab, refvar, sourcevar,
                            comps, center=True, scale=False):
-    """Shared PCA projection used by all three transforms."""
-    ref_vecs = [_vectorize_density(d) for d in ref_tab[refvar]]
-    src_vecs = [_vectorize_density(d) for d in source_tab[sourcevar]]
-
-    ref_lens = [len(v) for v in ref_vecs]
-    src_lens = [len(v) for v in src_vecs]
-    if len(set(ref_lens + src_lens)) != 1:
-        raise ValueError("All density vectors must share the same length for latent transforms.")
-
-    ref_mat = np.vstack(ref_vecs)
-    src_mat = np.vstack(src_vecs)
-    combined = np.vstack([ref_mat, src_mat])
-
-    n_components = min(comps, combined.shape[0], combined.shape[1])
-
-    pca = PCA(n_components=n_components)
-    # Center (and optionally scale) before PCA
-    if scale:
-        from sklearn.preprocessing import StandardScaler
-        scaler = StandardScaler(with_mean=center, with_std=True)
-        combined = scaler.fit_transform(combined)
-    elif center:
-        combined = combined - combined.mean(axis=0)
-
-    scores = pca.fit_transform(combined)
-
-    k = scores.shape[1]
-    n_ref = ref_mat.shape[0]
-
+    """Shared PCA projection used by all three transforms (R ``latent_pca_projection``)."""
+    model = _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
+                           comps=comps, center=center, scale=scale)
     return {
-        "ref_scores": scores[:n_ref],
-        "source_scores": scores[n_ref:],
-        "k": k,
-        "basis": pca,
+        "ref_scores": _project_scores(model, ref_tab, refvar),
+        "source_scores": _project_scores(model, source_tab, sourcevar),
+        "k": model["k"],
+        "basis": model["basis"],
     }
 
 
@@ -269,6 +335,7 @@ def _fit_transform(similarity_transform, ref_tab, source_tab, match_on,
     ``_apply_transform``.
     """
     # Identify which transform we're dealing with
+    similarity_transform = _resolve_similarity_transform(similarity_transform)
     _name = getattr(similarity_transform, "__name__", "")
 
     if _name == "latent_pca_transform":
@@ -312,32 +379,36 @@ def _apply_transform(model, ref_tab, source_tab, refvar="density",
 def _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
                    comps=30, center=True, scale=False, **kwargs):
     scale = _resolve_scale_alias(scale, kwargs)
-    ref_vecs = [_vectorize_density(d) for d in ref_tab[refvar]]
-    src_vecs = [_vectorize_density(d) for d in source_tab[sourcevar]]
-    combined = np.vstack(ref_vecs + src_vecs)
-    n_components = min(comps, combined.shape[0], combined.shape[1])
-    mean = combined.mean(axis=0) if center else np.zeros(combined.shape[1])
-    pca = PCA(n_components=n_components)
-    centered = combined - mean if center else combined
-    pca.fit(centered)
-    return {"transform": "latent_pca", "pca": pca, "mean": mean,
-            "center": center, "scale": scale}
+    ref_mat = _vectorize_density_tab(ref_tab, refvar)
+    src_mat = _vectorize_density_tab(source_tab, sourcevar, expected_len=ref_mat.shape[1])
+    combined = np.vstack([ref_mat, src_mat])
+    if combined.shape[0] == 0 or combined.shape[1] == 0:
+        raise ValueError("Cannot fit latent transform on empty density matrices.")
+    basis = _Prcomp(combined, comps=comps, center=center, scale=scale)
+    return {"transform": "latent_pca", "basis": basis, "pca": basis, "k": basis.k,
+            "input_dim": basis.input_dim, "center": center, "scale": scale,
+            "refvar": refvar, "sourcevar": sourcevar}
+
+
+def _project_scores(model, tab, var) -> np.ndarray:
+    """R ``project_transform_scores()``."""
+    basis = model["basis"]
+    if len(tab) == 0:
+        return np.zeros((0, basis.k))
+    return basis.transform(_vectorize_density_tab(tab, var, expected_len=basis.input_dim))
 
 
 def _apply_pca_model(model, ref_tab, source_tab, refvar, sourcevar):
-    pca = model["pca"]
-    mean = model["mean"]
-    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
-    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
-    ref_scores = pca.transform(ref_vecs - mean)
-    src_scores = pca.transform(src_vecs - mean)
+    ref_scores = _project_scores(model, ref_tab, refvar)
+    src_scores = _project_scores(model, source_tab, sourcevar)
     ref_tab = ref_tab.copy()
     source_tab = source_tab.copy()
     ref_tab[refvar] = _split_rows(ref_scores)
     source_tab[sourcevar] = _split_rows(src_scores)
     return {"ref_tab": ref_tab, "source_tab": source_tab,
             "refvar": refvar, "sourcevar": sourcevar,
-            "info": {"transform": "latent_pca"}}
+            "info": {"transform": "latent_pca", "comps": model["k"],
+                     "center": model["center"], "scale": model["scale"]}}
 
 
 # --- CORAL fit/apply ---
@@ -348,12 +419,8 @@ def _fit_coral_model(ref_tab, source_tab, refvar, sourcevar,
     scale = _resolve_scale_alias(scale, kwargs)
     pca_model = _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
                                comps=comps, center=center, scale=scale)
-    pca = pca_model["pca"]
-    mean = pca_model["mean"]
-    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
-    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
-    ref_scores = pca.transform(ref_vecs - mean)
-    src_scores = pca.transform(src_vecs - mean)
+    ref_scores = _project_scores(pca_model, ref_tab, refvar)
+    src_scores = _project_scores(pca_model, source_tab, sourcevar)
     ref_keys, src_keys = _transform_group_keys(ref_tab, source_tab, fit_by)
     group_levels = list(dict.fromkeys([*ref_keys.tolist(), *src_keys.tolist()]))
     group_adapts = {}
@@ -380,18 +447,14 @@ def _fit_coral_model(ref_tab, source_tab, refvar, sourcevar,
             "note": "ok",
         })
 
-    return {"transform": "coral", "pca": pca, "mean": mean,
+    return {"transform": "coral", "pca_model": pca_model,
             "group_adapts": group_adapts, "shrink": shrink, "center": center,
             "fit_by": fit_by, "groups": group_info}
 
 
 def _apply_coral_model(model, ref_tab, source_tab, refvar, sourcevar):
-    pca = model["pca"]
-    mean = model["mean"]
-    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
-    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
-    ref_scores = pca.transform(ref_vecs - mean)
-    src_scores = pca.transform(src_vecs - mean)
+    ref_scores = _project_scores(model["pca_model"], ref_tab, refvar)
+    src_scores = _project_scores(model["pca_model"], source_tab, sourcevar)
     adapted_src = src_scores.copy()
     _, src_keys = _transform_group_keys(ref_tab, source_tab, model.get("fit_by"))
     for group_key in dict.fromkeys(src_keys.tolist()):
@@ -483,14 +546,10 @@ def _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar,
     scale = _resolve_scale_alias(scale, kwargs)
     pca_model = _fit_pca_model(ref_tab, source_tab, refvar, sourcevar,
                                comps=comps, center=center, scale=scale)
-    pca = pca_model["pca"]
-    mean = pca_model["mean"]
-    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
-    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
-    ref_scores = pca.transform(ref_vecs - mean)
-    src_scores = pca.transform(src_vecs - mean)
+    ref_scores = _project_scores(pca_model, ref_tab, refvar)
+    src_scores = _project_scores(pca_model, source_tab, sourcevar)
 
-    k_target = ref_scores.shape[1]
+    k_target = pca_model["k"]
     ref_keys, src_keys = _transform_group_keys(ref_tab, source_tab, fit_by)
     group_levels = list(dict.fromkeys([*ref_keys.tolist(), *src_keys.tolist()]))
     group_models = {}
@@ -568,7 +627,7 @@ def _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar,
             "note": "ok",
         })
 
-    return {"transform": "cca", "pca": pca, "mean": mean,
+    return {"transform": "cca", "pca_model": pca_model,
             "group_models": group_models, "k": k_target,
             "shrink": shrink, "center": center, "scale": scale,
             "fit_by": fit_by, "unique_match_only": unique_match_only,
@@ -576,12 +635,8 @@ def _fit_cca_model(ref_tab, source_tab, match_on, refvar, sourcevar,
 
 
 def _apply_cca_model(model, ref_tab, source_tab, refvar, sourcevar):
-    pca = model["pca"]
-    mean = model["mean"]
-    ref_vecs = np.vstack([_vectorize_density(d) for d in ref_tab[refvar]])
-    src_vecs = np.vstack([_vectorize_density(d) for d in source_tab[sourcevar]])
-    ref_scores = pca.transform(ref_vecs - mean)
-    src_scores = pca.transform(src_vecs - mean)
+    ref_scores = _project_scores(model["pca_model"], ref_tab, refvar)
+    src_scores = _project_scores(model["pca_model"], source_tab, sourcevar)
 
     ref_tab = ref_tab.copy()
     source_tab = source_tab.copy()
@@ -597,7 +652,7 @@ def _apply_cca_model(model, ref_tab, source_tab, refvar, sourcevar):
     for group_key in group_levels:
         group_model = model.get("group_models", {}).get(group_key)
         if group_model is None:
-            if np.any(src_keys == group_key):
+            if any(k is group_key or k == group_key for k in src_keys):
                 unfitted.append("all" if group_key == "__all__" else str(group_key))
             continue
         k = group_model["k"]

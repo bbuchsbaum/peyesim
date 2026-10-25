@@ -15,12 +15,12 @@ across five distinct dimensions:
 | **vector** | Overall shape similarity of saccade vectors |
 | **direction** | Angular similarity of saccade directions |
 | **length** | Similarity of saccade amplitudes |
-| **position** | Spatial proximity of corresponding fixations |
-| **duration** | Similarity of fixation durations |
+| **position** | Distance between the start points of aligned saccades (the last fixation is not included) |
+| **duration** | Relative difference `abs(d1 - d2) / max(d1, d2)` of aligned fixation durations |
 
-The `peyesim` implementation adds a sixth metric, **position_emd**, based on
-the earth mover's distance between fixation locations. This captures
-distributional similarity that is not order-dependent.
+The `peyesim` implementation adds a sixth measure, **position_emd**: the
+duration-weighted earth mover's distance between all fixations (including the
+last), as `1 - EMD / screen diagonal`. It ignores the order of the fixations.
 
 
 ```python
@@ -67,7 +67,9 @@ Let's compare a linear scanpath against a zigzag pattern:
 ```python
 fg_zigzag = fixation_group(
     x=np.cumsum(np.full(10, 50.0)),
-    y=np.cumsum(np.array([50, -50, 50, -50, 50, -50, 50, -50, 50, -50], dtype=float)),
+    # alternate shallow and steep downward saccades: neither leg points the
+    # way the linear path goes (up and to the right)
+    y=400 + np.cumsum(np.tile([-10.0, -50.0], 5)),
     duration=rng.poisson(200, 10),
     onset=np.arange(1, 11, dtype=float),
 )
@@ -77,8 +79,11 @@ sp_zigzag = scanpath(fg_zigzag)
 multi_match(sp_linear, sp_zigzag, screensize=(500, 500))
 ```
 
-Notice how the **direction** metric drops substantially — the zigzag and
-linear paths follow very different angular trajectories.
+**Direction** falls well below its value for random pairs (about 0.72, shown
+below): neither zigzag leg points the way the linear path goes, so no alignment
+can pair them up. (A zigzag that alternates between up-right and down-right
+legs would not show this reliably, because the alignment can pair the up-right
+legs with the linear path.)
 
 ## What do the metrics look like for random scanpaths?
 
@@ -125,9 +130,35 @@ for ax, m, lbl, c in zip(axes.ravel(), metrics, labels, colors):
 plt.show()
 ```
 
-Each metric has a distinct baseline distribution. Direction similarity, for
-instance, clusters near 0.5 for random pairs, while position similarity is
-typically lower.
+None of the metrics sits near zero for unrelated scanpaths. Their medians over
+the random pairs are the baseline that a single similarity value has to be
+read against:
+
+```python
+ssdf[metrics].median().round(2).sort_values()
+```
+
+Direction is a useful example. Two independent saccade directions differ by
+an angle that is uniform on [0, π], which would put direction similarity near
+0.5. But MultiMatch first aligns the two scanpaths, pairing each saccade with
+the one in the other scanpath that makes the vector difference smallest, and
+that alignment favours saccades pointing the same way. Comparing saccade *i*
+with saccade *i*, without the alignment, does give about 0.5:
+
+```python
+def unaligned_direction(fg_a, fg_b):
+    # saccade directions; the last row of a scanpath has no outgoing saccade
+    theta_a = scanpath(fg_a)["theta"].to_numpy()[:-1]
+    theta_b = scanpath(fg_b)["theta"].to_numpy()[:-1]
+    # absolute angle between saccade i and saccade i, in [0, pi]
+    diff = np.abs(np.angle(np.exp(1j * (theta_a - theta_b))))
+    return 1 - np.median(diff) / np.pi
+
+pd.Series({
+    "aligned (mm_direction)": ssdf["mm_direction"].median(),
+    "unaligned": np.median([unaligned_direction(a, b) for a, b in fgs_list]),
+}).round(2)
+```
 
 ## What do extreme matches look like?
 
@@ -182,9 +213,10 @@ plot_extreme_grid("high")
 plt.show()
 ```
 
-The high-scoring examples show that a metric can look sensible even when
-another dimension of the same pair is unremarkable. For example, a pair may
-score high on duration while its spatial trajectory is not especially similar.
+The highest-scoring pairs are not visibly similar scanpaths: with ten random
+fixations each, a pair can score highly on one dimension (for example, similar
+saccade lengths) while differing everywhere else. This is why the six measures
+are reported separately rather than averaged.
 
 ```python
 #| fig-width: 8
@@ -194,9 +226,9 @@ plot_extreme_grid("low")
 plt.show()
 ```
 
-The low-scoring examples are just as important. They show which visual
-differences each metric penalizes: spatial displacement for position, angular
-changes for direction, and temporal mismatch for duration.
+The lowest-scoring pairs are not visibly more different than the others either:
+with ten random fixations, a low score on one dimension says little about the
+rest. (These plots do not show fixation durations.)
 
 ## How do transformations affect the metrics?
 
@@ -236,8 +268,9 @@ As expected, **direction** stays at 1.0, but **position** drops.
 
 ### Shuffling fixation order
 
-Keeping the same fixation locations but scrambling their order preserves
-**position** (and the EMD) while disrupting **direction**:
+Keeping the same fixation locations but scrambling their order (and their
+durations) separates the order-insensitive EMD from the sequence-based
+metrics:
 
 ```python
 rng2 = np.random.default_rng(3)
@@ -251,8 +284,11 @@ print("Order-shuffled:")
 multi_match(scanpath(fg), scanpath(fg_shuffled), (500, 500))
 ```
 
-The **position_emd** remains high (same spatial distribution), while
-**direction** drops (the trajectory has changed).
+Only **position_emd** is unchanged: it compares the two sets of fixations
+regardless of order, and the set is the same. **Position** drops as well as
+**direction**, because MultiMatch's position compares the start points of
+aligned saccades in sequence, and reordering moves them. **Duration** drops
+because the durations were shuffled with the locations.
 
 ## References
 

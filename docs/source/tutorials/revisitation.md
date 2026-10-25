@@ -38,9 +38,8 @@ one row per viewing:
 revisit_summary(rv)
 ```
 
-`radius` is in the units of the fixation coordinates. Kragel et al. (2021)
-used about 2 degrees of visual angle; `visual_angle_to_px()` converts degrees
-to pixels for a given display:
+`radius` is in the units of the fixation coordinates. To set it in degrees of
+visual angle, convert with `visual_angle_to_px()` for your display:
 
 ```python
 from peyesim import visual_angle_to_px
@@ -84,8 +83,8 @@ scored.to_pandas()[cols].head(8)
 ```
 
 `excess_revisits` is the observed count minus the expected count, and
-`excess_rate` is the same difference per opportunity. Rows without
-opportunities give NaN. The simulated fixations are random, so the excess
+`excess_rate` is the same difference per opportunity. Rows with
+no opportunities give NaN, as do rows whose image no other viewer saw. The simulated fixations are random, so the excess
 should be centred on zero:
 
 ```python

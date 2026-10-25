@@ -157,7 +157,7 @@ def _display(value) -> str | None:
     if value is None:
         return None
     if isinstance(value, pd.Series):
-        value = value.to_frame()
+        value = value.to_frame(name=value.name if value.name is not None else "value")
     if isinstance(value, pd.DataFrame) and type(value).__repr__ is pd.DataFrame.__repr__:
         return _frame_markdown(value)
     if isinstance(value, pd.DataFrame):

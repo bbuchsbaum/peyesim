@@ -60,10 +60,12 @@ def scanpath(fg: FixationGroup) -> Scanpath:
     polar = cart2pol(lenx, leny)
 
     out = fg.to_pandas(copy=True)
-    out["lenx"] = np.append(lenx, 0.0)
-    out["leny"] = np.append(leny, 0.0)
-    out["rho"] = np.append(polar[:, 0], 0.0)
-    out["theta"] = np.append(polar[:, 1], 0.0)
+    # The last fixation has no outgoing saccade (0); an empty group stays empty.
+    pad = [0.0] if len(xs) else []
+    out["lenx"] = np.append(lenx, pad)
+    out["leny"] = np.append(leny, pad)
+    out["rho"] = np.append(polar[:, 0], pad)
+    out["theta"] = np.append(polar[:, 1], pad)
 
     return Scanpath(out)
 

@@ -83,10 +83,12 @@ def _line_entropy(lengths: list[int]) -> float:
 
 
 def _relative_line_entropy(lengths: list[int]) -> float:
+    # crqa::crqa(): ENTR / -log(1 / k), k the number of distinct line lengths;
+    # a single length gives 0 / 0 = NaN.
     if not lengths:
         return np.nan
     entropy = _line_entropy(lengths)
-    n_bins = max(lengths) - min(lengths) + 1
+    n_bins = len(set(lengths))
     if not np.isfinite(entropy) or n_bins <= 1:
         return np.nan
     return float(entropy / np.log(n_bins))
@@ -146,16 +148,22 @@ def crqa(
             1: lambda: float(np.mean(dist)),
             2: lambda: float(np.max(dist)),
             3: lambda: float(np.min(dist)),
-            4: lambda: abs(float(np.sum(dist)) / (n_d ** 2 - n_d)) if n_d > 1 else np.nan,
-        }[rescale]()
-        effective_radius = float(radius) * stat
+            # crqa divides by N^2 - N even when N = 1 (giving Inf, or NaN for 0 / 0).
+            4: lambda: float(np.abs(np.divide(np.sum(dist), float(n_d ** 2 - n_d)))),
+        }
+        with np.errstate(divide="ignore", invalid="ignore"):
+            stat = stat[rescale]()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            effective_radius = float(radius) * stat
 
     recurrence = dist <= effective_radius
     recurrent_points = int(recurrence.sum())
     total_points = int(recurrence.size)
 
     diag_lengths = _diagonal_run_lengths(recurrence, min_length=min_line)
-    vert_lengths = _vertical_run_lengths(recurrence, min_length=min_line)
+    # crqa counts vertical lines down the columns of its RP (= recurrence.T):
+    # runs of consecutive fg2 points recurrent with one fg1 point.
+    vert_lengths = _vertical_run_lengths(recurrence.T, min_length=min_line)
     diag_points = int(sum(diag_lengths))
     vert_points = int(sum(vert_lengths))
     recurrence_rate = recurrent_points / total_points if total_points else np.nan
@@ -191,6 +199,10 @@ def crqa(
         # crqa::crqa() returns the plot with ts2 along the rows.
         "RP": recurrence.T,
     }
+    if recurrent_points > 0 and not diag_lengths:
+        # crqa::crqa() with recurrences but no diagonal line.
+        result.update({"DET": np.nan, "NRLINE": 0, "maxL": 0, "L": 0.0, "ENTR": np.nan,
+                       "rENTR": np.nan, "LAM": 0.0, "TT": 0.0, "max_vertlength": np.nan})
     if recurrent_points == 0:
         # crqa::crqa()'s "no recurrence" result.
         result.update({"RR": 0.0, "DET": np.nan, "NRLINE": 0, "maxL": 0, "L": 0.0,

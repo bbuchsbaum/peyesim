@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -13,5 +14,7 @@ def test_r_oracle_parity_smoke():
     if proc.returncode == 77:
         import pytest
 
+        if os.environ.get("PEYESIM_REQUIRE_R", "") not in ("", "0"):
+            pytest.fail(f"PEYESIM_REQUIRE_R is set but the oracle skipped: {proc.stderr.strip()}")
         pytest.skip(proc.stderr.strip())
     assert proc.returncode == 0, proc.stderr

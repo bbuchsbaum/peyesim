@@ -104,7 +104,9 @@ def eye_table(
         df["y"] = (df["y"] - clip_bounds[2]) * ydir
 
     rows = []
-    for keys, grp in df.groupby(groupvar, sort=True):
+    # dplyr::group_by() keeps missing keys as their own group, sorted last;
+    # observed=True drops unused factor levels as summarise() does.
+    for keys, grp in df.groupby(groupvar, sort=True, dropna=False, observed=True):
         if not isinstance(keys, tuple):
             keys = (keys,)
         fg = fixation_group(
@@ -129,7 +131,9 @@ def eye_table(
     else:
         origin = ((xmin + xmax) / 2, (ymin + ymax) / 2)
 
-    return EyeTable(rows, origin=origin)
+    # Keep the columns when every fixation was clipped (R returns a 0-row table).
+    columns = groupvar + ["fixgroup"] + [v for v in (extra_vars or []) if v not in groupvar]
+    return EyeTable(pd.DataFrame(rows, columns=columns), origin=origin)
 
 
 def simulate_eye_table(
@@ -157,13 +161,18 @@ def simulate_eye_table(
                 }
             )
 
+    frame = pd.DataFrame(rows, columns=["x", "y", "duration", "onset", "groupvar"])
+    # R uses factor(g, levels = 1:n_groups), so groups sort numerically (1, 2, ..., 10).
+    frame["groupvar"] = pd.Categorical(frame["groupvar"],
+                                       categories=[str(g) for g in range(1, n_groups + 1)])
+
     return eye_table(
         "x",
         "y",
         "duration",
         "onset",
         groupvar="groupvar",
-        data=pd.DataFrame(rows),
+        data=frame,
         clip_bounds=clip_bounds,
         relative_coords=relative_coords,
     )

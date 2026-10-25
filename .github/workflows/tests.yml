@@ -1,0 +1,144 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The R eyesim version the parity tests compare against. Change it
+  # deliberately, in its own commit, when peyesim is synced to a newer eyesim.
+  EYESIM_REPO: bbuchsbaum/eyesim
+  EYESIM_REF: 9ce29bcef0b3e510fecf5d224a35d0d783582e1a
+
+jobs:
+  python:
+    name: Python ${{ matrix.python }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # actions/setup-python has no Python 3.9 build for Ubuntu 26.04
+          # (ubuntu-latest); 24.04 still has one.
+          - os: ubuntu-24.04
+            python: "3.9"
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev,viz]"
+
+      - name: Test (R parity tests skip without R)
+        run: python -m pytest -q -n auto --dist loadfile
+
+  minimum-versions:
+    name: Oldest supported dependencies (Python 3.9)
+    runs-on: ubuntu-24.04  # see the Python 3.9 note above
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          cache: pip
+
+      - name: Install the lower bounds declared in pyproject.toml
+        run: |
+          python -m pip install "numpy==1.22.*" "pandas==1.4.*" "scipy==1.8.*" \
+            "scikit-learn==1.0.*" "statsmodels==0.13.*" "pot==0.9.0" "networkx==2.8" \
+            "matplotlib==3.8.*" pytest pytest-xdist
+          python -m pip install --no-deps -e .
+
+      - name: Test
+        run: python -m pytest -q -n auto --dist loadfile
+
+  core-only:
+    name: Without optional dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install without matplotlib
+        run: python -m pip install -e ".[dev]"
+
+      - name: Test
+        run: python -m pytest -q -n auto --dist loadfile
+
+  r-parity:
+    name: Parity with R eyesim
+    runs-on: ubuntu-latest
+    env:
+      EYESIM_SOURCE_DIR: ${{ github.workspace }}/eyesim-src
+      # Fail rather than skip when R or eyesim is missing.
+      PEYESIM_REQUIRE_R: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out R eyesim
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.EYESIM_REPO }}
+          ref: ${{ env.EYESIM_REF }}
+          path: eyesim-src
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      - name: Install R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: eyesim-src
+          dependencies: '"hard"'
+          # Suggested packages that eyesim functions under test need
+          # (igraph for multi_match) and that the oracle scripts call.
+          extra-packages: |
+            any::igraph
+            any::pkgload
+            any::jsonlite
+            any::crqa
+            any::emdist
+            any::energy
+            any::transport
+            any::T4transport
+            any::ppcor
+            any::nnls
+
+      - name: Compile eyesim once (parallel test workers then reuse it)
+        run: Rscript -e 'pkgload::load_all(Sys.getenv("EYESIM_SOURCE_DIR"), quiet = TRUE)'
+
+      - name: Install peyesim
+        run: python -m pip install -e ".[dev,viz]"
+
+      - name: Test, including every R parity test
+        run: python -m pytest -q -n auto --dist loadfile -rs
+
+      - name: Standalone R oracle script
+        run: python tools/r_oracle_parity.py

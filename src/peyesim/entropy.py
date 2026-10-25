@@ -79,6 +79,28 @@ def _entropy_eye_density(ed: EyeDensity, normalize: bool, base: float) -> float:
     return entropy_from_mass(ed.z, normalize=normalize, base=base)
 
 
+def _r_as_character(value: float) -> str:
+    """Format a number like R's ``as.character()`` (15 significant digits).
+
+    R writes the shorter of the fixed and scientific forms (fixed on a tie), so
+    names match R's ``paste0("sigma_", sigma)``: 30 -> "30", 12.345678901 ->
+    "12.345678901", 1e5 -> "1e+05".
+    """
+    v = float(value)
+    if not np.isfinite(v):
+        return "NA" if np.isnan(v) else ("Inf" if v > 0 else "-Inf")
+    if v == 0:
+        return "0"
+    sci = f"{v:.14e}"
+    mant, exp = sci.split("e")
+    mant = mant.rstrip("0").rstrip(".")
+    digits = len(mant.replace("-", "").replace(".", ""))
+    exp_i = int(exp)
+    sci_str = f"{mant}e{'-' if exp_i < 0 else '+'}{abs(exp_i):02d}"
+    fixed = f"{v:.{max(0, digits - 1 - exp_i)}f}"
+    return fixed if len(fixed) <= len(sci_str) else sci_str
+
+
 def _entropy_multiscale(
     edm: EyeDensityMultiscale,
     normalize: bool,
@@ -86,7 +108,7 @@ def _entropy_multiscale(
     aggregate: str = "mean",
 ) -> float | dict[str, float]:
     per_scale = {
-        f"sigma_{scale.sigma:g}": _entropy_eye_density(scale, normalize=normalize, base=base)
+        f"sigma_{_r_as_character(scale.sigma)}": _entropy_eye_density(scale, normalize=normalize, base=base)
         for scale in edm.scales
     }
     if aggregate == "none":
@@ -266,11 +288,17 @@ def fixation_entropy(
         if len(x) == 0:
             return np.nan
 
+        # R's method has formals for both methods and ignores the ones the
+        # chosen method does not use.
         if method == "density":
+            for key in ("grid", "grid_size"):
+                kwargs.pop(key, None)
             return _entropy_fixation_group_density(
                 x, normalize=normalize, base=base, aggregate=aggregate, **kwargs,
             )
         else:
+            for key in ("sigma", "outdim", "duration_weighted"):
+                kwargs.pop(key, None)
             return _entropy_fixation_group_grid(
                 x, normalize=normalize, base=base, **kwargs,
             )

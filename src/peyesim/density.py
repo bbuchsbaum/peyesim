@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import iqr as scipy_iqr
 
-from peyesim.fixations import FixationGroup
+from peyesim.fixations import FixationGroup, fixation_group
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +305,9 @@ def eye_density(
     change the estimate raise ``NotImplementedError``. ``kde_pkg="MASS"``
     evaluates the untruncated kernel, as ``MASS::kde2d`` does.
 
+    Missing fixation coordinates, or bounds that are not finite, give a
+    warning and ``None`` (R's KDE fails and eye_density() returns NULL).
+
     After optional normalization, each map is rounded like R's
     ``zapsmall(z, digits = 7)``: to 7 significant digits relative to the map
     maximum, so values below roughly ``max(z) * 5e-8`` become zero.
@@ -338,10 +341,12 @@ def eye_density(
     else:
         w_all = None
 
+    # Default bounds span all fixations (before any window), and like R's min()
+    # and max() they are missing when a coordinate is.
     if xbounds is None:
-        xbounds = (fg["x"].min(), fg["x"].max())
+        xbounds = (fg["x"].min(skipna=False), fg["x"].max(skipna=False))
     if ybounds is None:
-        ybounds = (fg["y"].min(), fg["y"].max())
+        ybounds = (fg["y"].min(skipna=False), fg["y"].max(skipna=False))
 
     # Window filtering
     fg_filtered = fg
@@ -380,6 +385,15 @@ def eye_density(
 
     if weighted and w.sum() <= 0:
         warnings.warn("Sum of weights is zero among the fixations used. Returning None.")
+        return None
+
+    # R's KDE call fails on missing coordinates or non-finite bounds, and
+    # eye_density() turns the failure into a warning and NULL.
+    coords_ok = not (fg_filtered["x"].isna().any() or fg_filtered["y"].isna().any())
+    bounds_ok = bool(np.all(np.isfinite(np.asarray([*xbounds, *ybounds], dtype=float))))
+    if not (coords_ok and bounds_ok):
+        warnings.warn("Density estimation failed: fixation coordinates or bounds are missing "
+                      "or not finite. Returning None.")
         return None
 
     if len(sigma_arr) > 1:
@@ -452,55 +466,66 @@ def density_by(
     fixvar: str = "fixgroup",
     result_name: str = "density",
     origin: tuple[float, float] | None = None,
+    **kwargs,
 ) -> pd.DataFrame:
-    """Compute density maps grouped by variables (mirrors R ``density_by``)."""
+    """Compute density maps grouped by variables (mirrors R ``density_by``).
+
+    Rows sharing the values of ``groups`` are pooled into one fixation group
+    (missing group values form their own group, as in dplyr) and passed to
+    :func:`eye_density`; without ``groups`` all rows are pooled. Further
+    keyword arguments (for example ``kde_pkg``, ``normalize`` or ``weights``)
+    are passed to :func:`eye_density`, like R's ``...``. The result has the
+    ``groups`` and ``keep_vars`` columns (first value per group), then
+    ``fixvar`` and ``result_name``; rows whose density is ``None`` are dropped
+    with a warning.
+    """
     if origin is None:
         origin = getattr(table, "_origin", None) or (0, 0)
 
+    def pooled(fgs) -> FixationGroup:
+        frames = [fg.to_pandas(copy=False) if isinstance(fg, FixationGroup) else pd.DataFrame(fg)
+                  for fg in fgs if fg is not None]
+        if not frames:
+            return fixation_group(np.array([]), np.array([]), np.array([]), np.array([]))
+        return FixationGroup(pd.concat(frames, ignore_index=True))
+
+    def dens(fg):
+        return eye_density(
+            fg, sigma, xbounds=xbounds, ybounds=ybounds,
+            outdim=outdim, duration_weighted=duration_weighted,
+            window=window, min_fixations=min_fixations, origin=origin, **kwargs,
+        )
+
+    if isinstance(keep_vars, str):
+        keep_vars = [keep_vars]
+    keep_vars = list(keep_vars or [])
     if groups is not None:
         if isinstance(groups, str):
             groups = [groups]
+        groups = list(groups)
 
-        grouped = table.groupby(groups, sort=True)
+        grouped = table.groupby(groups, sort=True, dropna=False, observed=True)
         rows = []
         for keys, grp in grouped:
             if not isinstance(keys, tuple):
                 keys = (keys,)
-            # Concatenate all fixation groups in this group
-            all_fg = pd.concat(
-                [fg.to_pandas(copy=False) if isinstance(fg, FixationGroup) else pd.DataFrame(fg) for fg in grp[fixvar]],
-                ignore_index=True,
-            )
-            all_fg = FixationGroup(all_fg)
-            d = eye_density(
-                all_fg, sigma, xbounds=xbounds, ybounds=ybounds,
-                outdim=outdim, duration_weighted=duration_weighted,
-                window=window, min_fixations=min_fixations, origin=origin,
-            )
+            all_fg = pooled(grp[fixvar])
             row = dict(zip(groups, keys))
-            row[fixvar] = all_fg
-            row[result_name] = d
-            if keep_vars:
-                for v in keep_vars:
+            for v in keep_vars:
+                if v not in row:
                     row[v] = grp[v].iloc[0]
+            row[fixvar] = all_fg
+            row[result_name] = dens(all_fg)
             rows.append(row)
 
-        result = pd.DataFrame(rows)
+        columns = list(dict.fromkeys(groups + keep_vars)) + [fixvar, result_name]
+        result = pd.DataFrame(rows, columns=columns)
     else:
-        all_fg = pd.concat(
-            [fg.to_pandas(copy=False) if isinstance(fg, FixationGroup) else pd.DataFrame(fg) for fg in table[fixvar]],
-            ignore_index=True,
-        )
-        all_fg = FixationGroup(all_fg)
-        d = eye_density(
-            all_fg, sigma, xbounds=xbounds, ybounds=ybounds,
-            outdim=outdim, duration_weighted=duration_weighted,
-            window=window, min_fixations=min_fixations, origin=origin,
-        )
-        result = pd.DataFrame([{fixvar: all_fg, result_name: d}])
+        all_fg = pooled(table[fixvar])
+        result = pd.DataFrame([{fixvar: all_fg, result_name: dens(all_fg)}])
 
     # Remove rows with None density
-    null_mask = result[result_name].isna() | result[result_name].apply(lambda x: x is None)
+    null_mask = result[result_name].apply(lambda x: x is None)
     if null_mask.any():
         warnings.warn("Removing rows with NULL density results in density_by().")
         result = result[~null_mask].reset_index(drop=True)
@@ -517,7 +542,8 @@ def suggest_sigma(
     """Suggest a kernel bandwidth using a 2-D Silverman rule.
 
     Returns ``nan`` when there are fewer than two fixations or, without display
-    bounds to clamp against, when the fixations have no spread.
+    bounds to clamp against, when the fixations have no spread. Missing
+    coordinates are an error, as in R.
     """
     if isinstance(x, FixationGroup):
         xvals = x["x"].to_numpy()
@@ -531,6 +557,9 @@ def suggest_sigma(
     n = len(xvals)
     if n < 2:
         return np.nan
+    if np.isnan(xvals).any() or np.isnan(yvals).any():
+        # R's IQR() stops on missing values rather than returning NA.
+        raise ValueError("suggest_sigma() does not accept missing coordinates.")
 
     iqr_x = scipy_iqr(xvals)
     iqr_y = scipy_iqr(yvals)

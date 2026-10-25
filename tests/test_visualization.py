@@ -202,6 +202,7 @@ def test_eyesim_colours_roles_and_unknown_role():
 
 
 def test_density_cmap_is_transparent_at_zero_and_clamps_above():
+    pytest.importorskip("matplotlib")
     cmap = eyesim_density_cmap()
     assert cmap(0.0)[3] == 0
     assert cmap(1.0)[3] == pytest.approx(0.9)
@@ -382,7 +383,7 @@ def test_r_parity_legend_number_formats(r_viz):
 
 
 def test_plot_fixation_group_skips_missing_onsets():
-    import matplotlib
+    matplotlib = pytest.importorskip("matplotlib")
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt

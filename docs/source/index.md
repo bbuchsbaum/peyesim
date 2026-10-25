@@ -10,8 +10,9 @@ experiment, using fixation density maps, template similarity with permutation
 baselines, MultiMatch scanpath comparison and cross-recurrence analysis.
 
 ```bash
-pip install peyesim            # core
-pip install "peyesim[viz]"     # with matplotlib plotting
+pip install "peyesim @ git+https://github.com/bbuchsbaum/peyesim"
+# with matplotlib for plotting:
+pip install "peyesim[viz] @ git+https://github.com/bbuchsbaum/peyesim"
 ```
 
 ```python
